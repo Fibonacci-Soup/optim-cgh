@@ -1,5 +1,11 @@
 {
     "python.linting.enabled": true,
     "python.linting.pylintEnabled": true,
-    "python.linting.banditEnabled": false
+    "python.linting.pylintArgs": [
+        "--max-line-length=200",
+        "--disable=consider-using-f-string,no-member"
+    ],
+    "python.formatting.autopep8Args": [
+        "--max-line-length=200"
+    ]
 }
