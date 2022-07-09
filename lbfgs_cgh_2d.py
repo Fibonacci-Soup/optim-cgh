@@ -71,8 +71,8 @@ def lbfgs_cgh_2d(target_field, distance=1, wavelength=0.000000532, pitch_size=0.
         if save_progress:
             # binary_phase_hologram = torch.where(phase > 0, 1, 0)
             multi_phase_hologram = phase % SLM_PHASE_RANGE / SLM_PHASE_RANGE
-            save_image(r'.\Output_2D_iter\iteration_{}_holo.bmp'.format(i), multi_phase_hologram)
-            save_image(r'.\Output_2D_iter\iteration_{}_recon.bmp'.format(i), reconstruction_normalised)
+            save_image(r'.\Output_2D_iter\holo_i_{}.bmp'.format(i), multi_phase_hologram)
+            save_image(r'.\Output_2D_iter\recon_i_{}.bmp'.format(i), reconstruction_normalised)
 
     torch.no_grad()
     hologram = amplitude * torch.exp(1j * phase)
@@ -109,13 +109,13 @@ def main():
         wavelength=LASER_WAVELENGTH,
         pitch_size=SLM_PITCH_SIZE,
         save_progress=True,
-        iteration_number=10,
+        iteration_number=50,
         cuda=True,
         learning_rate=0.1,
         propagation_function=fraunhofer_propergation,  # Uncomment to choose Fraunhofer propagation
         # propagation_function = fresnel_propergation, # Uncomment to choose Fresnel Propagation
-        # loss_function = torch.nn.MSELoss(reduction="sum") # Uncomment to choose MSE loss
-        loss_function=torch.nn.CrossEntropyLoss(label_smoothing=0.0, reduction="sum")  # Uncommnet to choos CE loss
+        loss_function = torch.nn.MSELoss(reduction="sum") # Uncomment to choose MSE loss
+        # loss_function=torch.nn.CrossEntropyLoss(label_smoothing=0.0, reduction="sum")  # Uncommnet to choos CE loss
     )
     print("time = ", time.time() - time_start)
 

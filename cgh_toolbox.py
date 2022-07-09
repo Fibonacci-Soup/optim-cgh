@@ -120,7 +120,5 @@ def normalise_reconstruction(reconstruction):
     :returns: the normalised reconstruction
     """
     reconstruction_abs = reconstruction.abs()
-    recon_ceil = reconstruction_abs.size(0) + reconstruction_abs.size(1)
-    reconstruction_abs[reconstruction_abs > recon_ceil] = recon_ceil
-    reconstruction_abs = reconstruction_abs / recon_ceil
+    reconstruction_abs = reconstruction_abs / (reconstruction_abs.size(0) + reconstruction_abs.size(1))
     return reconstruction_abs

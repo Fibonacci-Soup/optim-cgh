@@ -85,11 +85,11 @@ def lbfgs_cgh_3d(target_fields, distances, each_slice_in_turn=False,
         if save_progress:
             # Save hologram
             multi_phase_hologram = phase % SLM_PHASE_RANGE / SLM_PHASE_RANGE
-            save_image(r'.\Output_3D_iter\iteration_{}_holo.bmp'.format(i), multi_phase_hologram)
+            save_image(r'.\Output_3D_iter\holo_i_{}.bmp'.format(i), multi_phase_hologram)
             # Save reconstructions at all distances
             for distance in distances:
                 reconstruction = fresnel_propergation(hologram, distance=distance)
-                save_image(r'.\Output_3D_iter\iteration_{}_recon_d_{}.bmp'.format(i, distance), normalise_reconstruction(reconstruction))
+                save_image(r'.\Output_3D_iter\recon_i_{}_d_{}.bmp'.format(i, distance), normalise_reconstruction(reconstruction))
 
     torch.no_grad()
     hologram = amplitude * torch.exp(1j * phase)
@@ -102,13 +102,13 @@ def main():
     """
 
     # Set distances for each target image
-    distances = [.05, .06, .07, 0.071]
+    distances = [.1, .2, .3, .4]
 
     # Set target images
     images = [Image.open(r".\Target_images\A.bmp"),
-              Image.open(r".\Target_images\szzx1.bmp"),
-              Image.open(r".\Target_images\guang.bmp"),
-              Image.open(r".\Target_images\mandrill1.bmp")]
+              Image.open(r".\Target_images\B.bmp"),
+              Image.open(r".\Target_images\C.bmp"),
+              Image.open(r".\Target_images\D.bmp")]
 
     # Check for mismatch between numbers of distances and images given
     if len(distances) != len(images):
@@ -137,7 +137,7 @@ def main():
         wavelength=LASER_WAVELENGTH,
         pitch_size=SLM_PITCH_SIZE,
         save_progress=True,
-        iteration_number=10,
+        iteration_number=50,
         cuda=True,
         learning_rate=0.1,
         # loss_function = torch.nn.MSELoss(reduction="sum") # Uncomment to choose MSE loss
