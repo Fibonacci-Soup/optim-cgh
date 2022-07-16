@@ -59,8 +59,10 @@ def lbfgs_cgh_2d(target_field, distance=1, wavelength=0.000000532, pitch_size=0.
         reconstruction_normalised = normalise_reconstruction(reconstruction)
 
         # Calculate loss and step optimizer
-        loss = loss_function(torch.flatten(reconstruction_normalised).expand(1, -1),
-                             torch.flatten(target_field).expand(1, -1))  # flatten tensors into 1D
+        loss = loss_function(torch.flatten(reconstruction_normalised).expand(1, -1), torch.flatten(target_field).expand(1, -1))  # flatten tensors into 1D
+        # loss = torch.nn.MSELoss(reduction="mean")(torch.tensor([0,0]),torch.tensor([0,0.1]))
+        # print(((torch.tensor([0,0]) - torch.tensor([0,0.1])) ** 2).mean().item())
+        print("WTF", loss.item())
         loss.backward(retain_graph=True)
 
         def closure():
@@ -113,9 +115,9 @@ def main():
         cuda=True,
         learning_rate=0.1,
         propagation_function=fraunhofer_propergation,  # Uncomment to choose Fraunhofer propagation
-        # propagation_function = fresnel_propergation, # Uncomment to choose Fresnel Propagation
-        loss_function = torch.nn.MSELoss(reduction="sum") # Uncomment to choose MSE loss
-        # loss_function=torch.nn.CrossEntropyLoss(label_smoothing=0.0, reduction="sum")  # Uncommnet to choos CE loss
+        # propagation_function=fresnel_propergation, # Uncomment to choose Fresnel Propagation
+        # loss_function=torch.nn.MSELoss(reduction="mean")  # Uncomment to choose MSE loss
+        loss_function=torch.nn.CrossEntropyLoss(label_smoothing=0.0, reduction="mean")  # Uncommnet to choose CE loss
     )
     print("time = ", time.time() - time_start)
 

@@ -64,7 +64,7 @@ def fraunhofer_propergation(hologram, *_):
     :param *_: stash away unused variables (e.g. distance, pitch_size, wavelength)
     :returns: the reconstruction of the hologram at far field
     """
-    return torch.fft.fftshift(torch.fft.fft2(hologram))
+    return torch.fft.fftshift(torch.fft.fft2(torch.fft.fftshift(hologram)))
 
 def fresnel_propergation(hologram, distance=2, pitch_size=0.0000136, wavelength=0.000000532):
     """
@@ -108,7 +108,7 @@ def fresnel_propergation(hologram, distance=2, pitch_size=0.0000136, wavelength=
 
     h = (-1j)*torch.exp(-1j/(wavelength*distance) * np.pi * (x_meters**2 + y_meters**2))
     U2 = h * hologram
-    u2 = torch.fft.fftshift(torch.fft.fft2(U2))
+    u2 = torch.fft.fftshift(torch.fft.fft2(torch.fft.fftshift(U2)))
     return u2
 
 
