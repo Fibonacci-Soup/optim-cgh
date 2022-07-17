@@ -7,9 +7,9 @@ All Rights Reserved.
 This is the toolbox for Computer-Generated Hologram (CGH) related functions.
 """
 
-from PIL import Image
+import math
 import torch
-import numpy as np
+import torchvision
 
 def add_zeros_below(target_field):
     """
@@ -19,6 +19,7 @@ def add_zeros_below(target_field):
     :returns: the image being added zeros of same dimensions below
     """
     return torch.cat((target_field, torch.zeros([target_field.size(0), target_field.size(1)])), 0)
+
 
 def add_up_side_down_replica_below(target_field):
     """
@@ -30,6 +31,7 @@ def add_up_side_down_replica_below(target_field):
     target_up_side_down = torch.rot90(target_field, 2, [0, 1])
     return torch.cat((target_field, target_up_side_down), 0)
 
+
 def flip_left_right(target_field):
     """
     Flip the image left and right
@@ -39,22 +41,6 @@ def flip_left_right(target_field):
     """
     return torch.fliplr(target_field)
 
-def save_image(file_name, image_tensor, vmin=0., vmax=1.):
-    """
-    Save the given image to a file
-
-    :param str file_name (str): File name to save
-    :param torch.tensor image_tensor: input tensor representing the image to save
-    :param float vmin: minimum value of the data range that the colormap covers
-    :param float vmax: maximum value of the data range that the colormap covers
-    """
-    image_numpy = image_tensor.cpu().detach().numpy()
-    image_numpy[image_numpy < vmin] = vmin
-    image_numpy[image_numpy > vmax] = vmax
-    image_numpy /= (vmax - vmin)
-    image_numpy *= 255
-    result_img = Image.fromarray(image_numpy).convert("L")
-    result_img.save(file_name)
 
 def fraunhofer_propergation(hologram, *_):
     """
@@ -65,6 +51,7 @@ def fraunhofer_propergation(hologram, *_):
     :returns: the reconstruction of the hologram at far field
     """
     return torch.fft.fftshift(torch.fft.fft2(torch.fft.fftshift(hologram)))
+
 
 def fresnel_propergation(hologram, distance=2, pitch_size=0.0000136, wavelength=0.000000532):
     """
@@ -106,19 +93,13 @@ def fresnel_propergation(hologram, distance=2, pitch_size=0.0000136, wavelength=
                            dtype=torch.float32).to(hologram.device)
     y_meters, x_meters = torch.meshgrid(y_lin, x_lin, indexing='ij')
 
-    h = (-1j)*torch.exp(-1j/(wavelength*distance) * np.pi * (x_meters**2 + y_meters**2))
+    h = (-1j)*torch.exp(-1j/(wavelength*distance) * math.pi * (x_meters**2 + y_meters**2))
     U2 = h * hologram
     u2 = torch.fft.fftshift(torch.fft.fft2(torch.fft.fftshift(U2)))
     return u2
 
 
-def normalise_reconstruction(reconstruction):
-    """
-    Normalise the reconstruction resulting from Fraunhofer or Fresnel diffraction into the range of [0, 1]
-
-    :param torch.tensor reconstruction: input tensor representing the reconstruction
-    :returns: the normalised reconstruction
-    """
-    reconstruction_abs = reconstruction.abs()
-    reconstruction_abs = reconstruction_abs / (reconstruction_abs.size(0) + reconstruction_abs.size(1))
-    return reconstruction_abs
+def save_image(filename, image_tensor, tensor_dynamic_range=None):
+    if tensor_dynamic_range is None:
+        tensor_dynamic_range = image_tensor.max()
+    torchvision.io.write_png((image_tensor / tensor_dynamic_range * 255.0).to(torch.uint8), filename + ".png", compression_level=0)

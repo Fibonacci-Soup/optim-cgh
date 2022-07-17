@@ -10,15 +10,16 @@ optimisation of Computer-Generated Hologram (CGH) whose reconstruction is a 2D t
 
 import os
 import time
+import math
 import torch
-import numpy as np
-from PIL import Image, ImageOps
-from cgh_toolbox import save_image, fraunhofer_propergation, fresnel_propergation, normalise_reconstruction
+import torchvision
+from cgh_toolbox import save_image, fraunhofer_propergation, fresnel_propergation
 
 # Experimental setup - device properties
-SLM_PHASE_RANGE = 2 * np.pi
+SLM_PHASE_RANGE = 2 * math.pi
 SLM_PITCH_SIZE = 0.0000136
 LASER_WAVELENGTH = 0.000000532
+IMAGE_DYNAMIC_RANGE = 255.0
 
 
 def lbfgs_cgh_2d(target_field, distance=1, wavelength=0.000000532, pitch_size=0.0000136,
@@ -43,11 +44,13 @@ def lbfgs_cgh_2d(target_field, distance=1, wavelength=0.000000532, pitch_size=0.
     torch.cuda.empty_cache()
     torch.manual_seed(0)
     device = torch.device("cuda" if cuda else "cpu")
+
     target_field = target_field.to(device)
+
     # Fixed unit amplitude
-    amplitude = torch.ones(target_field.size(0), target_field.size(1), requires_grad=False).to(device)
+    amplitude = torch.ones(target_field.size(), requires_grad=False).to(torch.float64).to(device)
     # Random initial phase within [-pi, pi]
-    phase = ((torch.rand(target_field.size(0), target_field.size(1)) * 2 - 1) * np.pi).detach().to(device).requires_grad_()
+    phase = ((torch.rand(target_field.size()) * 2 - 1) * math.pi).to(torch.float64).detach().to(device).requires_grad_()
     optimizer = torch.optim.LBFGS([{'params': [phase]}], lr=learning_rate, max_iter=200)
 
     for i in range(iteration_number):
@@ -55,26 +58,28 @@ def lbfgs_cgh_2d(target_field, distance=1, wavelength=0.000000532, pitch_size=0.
 
         # Propagate hologram to reconstruction plane
         hologram = amplitude * torch.exp(1j * phase)
-        reconstruction = propagation_function(hologram, distance, pitch_size, wavelength)
-        reconstruction_normalised = normalise_reconstruction(reconstruction)
-
-        # Calculate loss and step optimizer
-        loss = loss_function(torch.flatten(reconstruction_normalised).expand(1, -1), torch.flatten(target_field).expand(1, -1))  # flatten tensors into 1D
-        # loss = torch.nn.MSELoss(reduction="mean")(torch.tensor([0,0]),torch.tensor([0,0.1]))
-        # print(((torch.tensor([0,0]) - torch.tensor([0,0.1])) ** 2).mean().item())
-        print("WTF", loss.item())
-        loss.backward(retain_graph=True)
-
-        def closure():
-            return loss
-        optimizer.step(closure)
+        reconstruction_abs = propagation_function(hologram, distance, pitch_size, wavelength).abs()
+        reconstruction_normalised = reconstruction_abs * torch.sqrt((target_field**2).sum() / (reconstruction_abs**2).sum())
 
         # Save hologram and reconstruction every iteration, if needed
         if save_progress:
             # binary_phase_hologram = torch.where(phase > 0, 1, 0)
             multi_phase_hologram = phase % SLM_PHASE_RANGE / SLM_PHASE_RANGE
-            save_image(r'.\Output_2D_iter\holo_i_{}.bmp'.format(i), multi_phase_hologram)
-            save_image(r'.\Output_2D_iter\recon_i_{}.bmp'.format(i), reconstruction_normalised)
+            save_image(r'.\Output_2D_iter\holo_i_{}'.format(i), multi_phase_hologram.detach().cpu(), 1.0)
+            save_image(r'.\Output_2D_iter\recon_i_{}'.format(i), reconstruction_normalised.detach().cpu(), IMAGE_DYNAMIC_RANGE)
+
+        # Calculate loss and step optimizer
+        loss = loss_function(torch.flatten(reconstruction_normalised).expand(1, -1), torch.flatten(target_field).expand(1, -1))  # flatten 2D images into 1D array
+        print("torch loss", (torch.nn.MSELoss(reduction="mean")(reconstruction_normalised, target_field)).item() / (target_field**2).sum())
+        numpy_recon = reconstruction_normalised.detach().cpu().numpy()
+        numpy_target = target_field.detach().cpu().numpy()
+        print("numpy calulates NMSE", ((numpy_recon - numpy_target)**2).mean() / (numpy_target**2).sum())
+
+        loss.backward(retain_graph=True)
+
+        def closure():
+            return loss
+        optimizer.step(closure)
 
     torch.no_grad()
     hologram = amplitude * torch.exp(1j * phase)
@@ -85,23 +90,12 @@ def main():
     """
     Main function of lbfgs_cgh_2d
     """
-
-    # Set target image
-    image = Image.open(r".\Target_images\mandrill.tiff")
-    # image = Image.open(".\Target_images\mandrill2.bmp")
-    # image = Image.open(".\Target_images\szzx_grey.jpg")
-    # image = Image.open(".\Target_images\szzx2.bmp")
-
-    # Load target image
-    image = ImageOps.grayscale(image)  # .resize((int(image.size[0]*1024*2/image.size[1]),1024*2))
-    image = np.array(image)
-    target_field = torch.from_numpy(image).float()
-    target_field = target_field / 255
+    target_field = torchvision.io.read_image(r".\Target_images\mandrill.png", torchvision.io.ImageReadMode.GRAY).to(torch.float64) / 255.0 * IMAGE_DYNAMIC_RANGE
 
     # Check if output folder exists, then save a copy of target_field
     if not os.path.isdir('Output_2D_iter'):
         os.makedirs('Output_2D_iter')
-    save_image(r'.\Output_2D_iter\Target_field.png', target_field)
+    save_image(r'.\Output_2D_iter\Target_field', target_field, IMAGE_DYNAMIC_RANGE)
 
     # Carry out optimisation
     time_start = time.time()
@@ -116,20 +110,20 @@ def main():
         learning_rate=0.1,
         propagation_function=fraunhofer_propergation,  # Uncomment to choose Fraunhofer propagation
         # propagation_function=fresnel_propergation, # Uncomment to choose Fresnel Propagation
-        # loss_function=torch.nn.MSELoss(reduction="mean")  # Uncomment to choose MSE loss
-        loss_function=torch.nn.CrossEntropyLoss(label_smoothing=0.0, reduction="mean")  # Uncommnet to choose CE loss
+        loss_function=torch.nn.MSELoss(reduction="mean")  # Uncomment to choose MSE loss
+        # loss_function=torch.nn.CrossEntropyLoss(label_smoothing=0.0, reduction="mean")  # Uncommnet to choose CE loss
     )
     print("time = ", time.time() - time_start)
 
     # Save final hologram
     multi_phase_hologram = hologram.angle() % SLM_PHASE_RANGE / SLM_PHASE_RANGE
-    save_image(r'.\Output_2D_iter\LBFGS_holo.bmp', multi_phase_hologram, vmin=0., vmax=1.)
+    save_image(r'.\Output_2D_iter\LBFGS_holo', multi_phase_hologram.detach().cpu())
 
     # Save reconstructions at different distances to check defocus
     for distance in [0.1, 0.5, 1, 5, 10, 100, 10**9]:
-        reconstruction = fresnel_propergation(hologram, distance, SLM_PITCH_SIZE, LASER_WAVELENGTH)
-        reconstruction_normalised = normalise_reconstruction(reconstruction)
-        save_image(r'.\Output_2D_iter\LBFGS_recon_defocused_at_{}.bmp'.format(distance), reconstruction_normalised)
+        reconstruction_abs = fresnel_propergation(hologram, distance, SLM_PITCH_SIZE, LASER_WAVELENGTH).abs()
+        reconstruction_normalised = reconstruction_abs * torch.sqrt((target_field**2).sum() / (reconstruction_abs**2).sum())
+        save_image(r'.\Output_2D_iter\LBFGS_recon_defocused_at_{}'.format(distance), reconstruction_normalised.detach().cpu(), IMAGE_DYNAMIC_RANGE)
 
 
 if __name__ == "__main__":
