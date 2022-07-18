@@ -80,8 +80,8 @@ def fresnel_propergation(hologram, distance=2, pitch_size=0.0000136, wavelength=
     """
 
     distance = torch.tensor([distance]).to(hologram.device)
-    holo_height = hologram.shape[0]
-    holo_width = hologram.shape[1]
+    holo_height = hologram.shape[-2]
+    holo_width = hologram.shape[-1]
 
     x_lin = torch.linspace(-pitch_size * (holo_width - 1) / 2,
                            pitch_size * (holo_width - 1) / 2,
@@ -103,3 +103,6 @@ def save_image(filename, image_tensor, tensor_dynamic_range=None):
     if tensor_dynamic_range is None:
         tensor_dynamic_range = image_tensor.max()
     torchvision.io.write_png((image_tensor / tensor_dynamic_range * 255.0).to(torch.uint8), filename + ".png", compression_level=0)
+
+def energy_conserve(field, scaling=1.0):
+    return field * torch.sqrt((scaling * field.size(-1) * field.size(-2)) / (field**2).sum())

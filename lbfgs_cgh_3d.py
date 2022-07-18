@@ -11,16 +11,16 @@ consisted of multiple slices of 2D images at different distances.
 
 import os
 import time
+import math
 import torch
-import numpy as np
-from PIL import Image, ImageOps
-from cgh_toolbox import save_image, fresnel_propergation, normalise_reconstruction
+import torchvision
+from cgh_toolbox import save_image, fresnel_propergation, energy_conserve
 
 # Experimental setup - device properties
-SLM_PHASE_RANGE = 2 * np.pi
+SLM_PHASE_RANGE = 2 * math.pi
 SLM_PITCH_SIZE = 0.0000136
 LASER_WAVELENGTH = 0.000000532
-
+ENERGY_CONSERVATION_SCALING = 1.0
 
 def lbfgs_cgh_3d(target_fields, distances, each_slice_in_turn=False,
                  wavelength=0.000000532, pitch_size=0.0000136, save_progress=False, iteration_number=20,
@@ -47,9 +47,9 @@ def lbfgs_cgh_3d(target_fields, distances, each_slice_in_turn=False,
     device = torch.device("cuda" if cuda else "cpu")
     target_fields = target_fields.to(device)
     # Fixed unit amplitude
-    amplitude = torch.ones(target_fields[0].size(0), target_fields[0].size(1), requires_grad=False).to(device)
+    amplitude = torch.ones(target_fields[0].size(), requires_grad=False).to(torch.float64).to(device)
     # Random initial phase within [-pi, pi]
-    phase = ((torch.rand(target_fields[0].size(0), target_fields[0].size(1)) * 2 - 1) * np.pi).detach().to(device).requires_grad_()
+    phase = ((torch.rand(target_fields[0].size()) * 2 - 1) * math.pi).to(torch.float64).detach().to(device).requires_grad_()
     optimizer = torch.optim.LBFGS([{'params': [phase]}], lr=learning_rate, max_iter=200)
 
     for i in range(iteration_number):
@@ -59,18 +59,21 @@ def lbfgs_cgh_3d(target_fields, distances, each_slice_in_turn=False,
         if each_slice_in_turn:
             # Propagate hologram for one distance only
             slice_number = i % len(target_fields)
-            reconstruction = fresnel_propergation(hologram, distances[slice_number], pitch_size, wavelength)
+            reconstruction_abs = fresnel_propergation(hologram, distances[slice_number], pitch_size, wavelength).abs()
+            reconstruction_normalised = energy_conserve(reconstruction_abs, ENERGY_CONSERVATION_SCALING)
 
             # Calculate loss for the single slice
-            loss = loss_function(torch.flatten(normalise_reconstruction(reconstruction)).expand(1, -1),
+            loss = loss_function(torch.flatten(reconstruction_normalised).expand(1, -1),
                                  torch.flatten(target_fields[slice_number]).expand(1, -1))
         else:
             # Propagate hologram for all distances
             reconstructions_list = []
             for distance in distances:
-                reconstruction = fresnel_propergation(hologram, distance=distance, pitch_size=pitch_size, wavelength=wavelength)
-                reconstructions_list.append(normalise_reconstruction(reconstruction))
+                reconstruction_abs = fresnel_propergation(hologram, distance=distance, pitch_size=pitch_size, wavelength=wavelength).abs()
+                reconstruction_normalised = energy_conserve(reconstruction_abs, ENERGY_CONSERVATION_SCALING)
+                reconstructions_list.append(reconstruction_normalised)
             reconstructions = torch.stack(reconstructions_list)
+
             # Calculate loss for all slices (stacked in reconstructions)
             loss = loss_function(torch.flatten(reconstructions).expand(1, -1),
                                  torch.flatten(target_fields).expand(1, -1))
@@ -85,11 +88,12 @@ def lbfgs_cgh_3d(target_fields, distances, each_slice_in_turn=False,
         if save_progress:
             # Save hologram
             multi_phase_hologram = phase % SLM_PHASE_RANGE / SLM_PHASE_RANGE
-            save_image(r'.\Output_3D_iter\holo_i_{}.bmp'.format(i), multi_phase_hologram)
+            save_image(r'.\Output_3D_iter\holo_i_{}'.format(i), multi_phase_hologram.detach().cpu(), 1.0)
             # Save reconstructions at all distances
-            for distance in distances:
-                reconstruction = fresnel_propergation(hologram, distance=distance)
-                save_image(r'.\Output_3D_iter\recon_i_{}_d_{}.bmp'.format(i, distance), normalise_reconstruction(reconstruction))
+            for index, distance in enumerate(distances):
+                reconstruction_abs = fresnel_propergation(hologram, distance, SLM_PITCH_SIZE, LASER_WAVELENGTH).abs()
+                reconstruction_normalised = energy_conserve(reconstruction_abs, ENERGY_CONSERVATION_SCALING)
+                save_image(r'.\Output_3D_iter\recon_i_{}_d_{}'.format(i, index), reconstruction_normalised.detach().cpu(), target_fields.detach().cpu().max())
 
     torch.no_grad()
     hologram = amplitude * torch.exp(1j * phase)
@@ -102,13 +106,11 @@ def main():
     """
 
     # Set distances for each target image
-    distances = [.1, .2, .3, .4]
+    distances = [0.1, 0.2, 0.3, 0.4]
 
     # Set target images
-    images = [Image.open(r".\Target_images\A.bmp"),
-              Image.open(r".\Target_images\B.bmp"),
-              Image.open(r".\Target_images\C.bmp"),
-              Image.open(r".\Target_images\D.bmp")]
+    images = [r".\Target_images\A.png", r".\Target_images\B.png", r".\Target_images\C.png", r".\Target_images\D.png"]
+    # images = [r".\Target_images\grey-scale-test.png", r".\Target_images\szzx1.png", r".\Target_images\guang.png", r".\Target_images\mandrill1.png"]
 
     # Check for mismatch between numbers of distances and images given
     if len(distances) != len(images):
@@ -116,28 +118,29 @@ def main():
 
     # Load target images
     target_fields_list = []
-    for i in range(len(images)):
-        image = ImageOps.grayscale(images[i])
-        image = np.array(image)
-        target_fields_list.append(torch.from_numpy(image).float() / 255)
+    for image_name in images:
+        target_field = torchvision.io.read_image(image_name, torchvision.io.ImageReadMode.GRAY).to(torch.float64)
+        target_field_normalised = energy_conserve(target_field, ENERGY_CONSERVATION_SCALING)
+        target_fields_list.append(target_field_normalised)
     target_fields = torch.stack(target_fields_list)
+    print("save_image_dynamic_range", target_fields.max().tolist())
 
     # Check if output folder exists, then save copies of target_fields
     if not os.path.isdir('Output_3D_iter'):
         os.makedirs('Output_3D_iter')
-    for i in range(len(target_fields)):
-        save_image(r'.\Output_3D_iter\Target_field_d_{}.bmp'.format(distances[i]), target_fields[i])
+    for i, target_field in enumerate(target_fields):
+        save_image(r'.\Output_3D_iter\Target_field_d_{}'.format(distances[i]), target_field, target_fields.max())
 
     # Carry out optimisation
     time_start = time.time()
     hologram = lbfgs_cgh_3d(
         target_fields,
         distances,
-        each_slice_in_turn=False,
+        each_slice_in_turn=True,
         wavelength=LASER_WAVELENGTH,
         pitch_size=SLM_PITCH_SIZE,
-        save_progress=True,
-        iteration_number=50,
+        save_progress=False,
+        iteration_number=100,
         cuda=True,
         learning_rate=0.1,
         # loss_function = torch.nn.MSELoss(reduction="sum") # Uncomment to choose MSE loss
@@ -148,13 +151,13 @@ def main():
     # Save final hologram
     phase_hologram = hologram.angle()
     multi_phase_hologram = phase_hologram % SLM_PHASE_RANGE / SLM_PHASE_RANGE
-    save_image(r'.\Output_3D_iter\LBFGS_holo_distances_{}.bmp'.format(distances), multi_phase_hologram)
+    save_image(r'.\Output_3D_iter\LBFGS_holo_distances_{}'.format(distances), multi_phase_hologram.detach().cpu(), 1.0)
 
     # Save reconstructions at all distances
-    for distance in distances:
-        reconstruction = fresnel_propergation(hologram, distance=distance)
-        reconstruction_normalised = normalise_reconstruction(reconstruction)
-        save_image(r'.\Output_3D_iter\LBFGS_recon_distance_{}.bmp'.format(distance), reconstruction_normalised)
+    for index, distance in enumerate(distances):
+        reconstruction_abs = fresnel_propergation(hologram, distance, SLM_PITCH_SIZE, LASER_WAVELENGTH).abs()
+        reconstruction_normalised = energy_conserve(reconstruction_abs, ENERGY_CONSERVATION_SCALING)
+        save_image(r'.\Output_3D_iter\LBFGS_recon_defocused_at_{}'.format(distance), reconstruction_normalised.detach().cpu())
 
 
 if __name__ == "__main__":
