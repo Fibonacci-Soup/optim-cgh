@@ -106,7 +106,7 @@ def main():
     """
 
     # Set distances for each target image
-    distances = [0.1, 0.2, 0.3, 0.4]
+    distances = [0.2, 0.8, 1.6, 3.2]
 
     # Set target images
     images = [r".\Target_images\A.png", r".\Target_images\B.png", r".\Target_images\C.png", r".\Target_images\D.png"]
@@ -129,7 +129,7 @@ def main():
     if not os.path.isdir('Output_3D_iter'):
         os.makedirs('Output_3D_iter')
     for i, target_field in enumerate(target_fields):
-        save_image(r'.\Output_3D_iter\Target_field_d_{}'.format(distances[i]), target_field, target_fields.max())
+        save_image(r'.\Output_3D_iter\Target_field_{}'.format(i), target_field, target_fields.max())
 
     # Carry out optimisation
     time_start = time.time()

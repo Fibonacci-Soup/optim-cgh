@@ -7,6 +7,7 @@ All Rights Reserved.
 This is the toolbox for Computer-Generated Hologram (CGH) related functions.
 """
 
+import os
 import math
 import torch
 import torchvision
@@ -106,3 +107,19 @@ def save_image(filename, image_tensor, tensor_dynamic_range=None):
 
 def energy_conserve(field, scaling=1.0):
     return field * torch.sqrt((scaling * field.size(-1) * field.size(-2)) / (field**2).sum())
+
+def gerchberg_saxton(target_field, iteration_number=50):
+    # if not os.path.isdir('Output_GS'):
+    #     os.makedirs('Output_GS')
+    torch.manual_seed(0)
+    A = torch.exp(1j * ((torch.rand(target_field.size()) * 2 - 1) * math.pi).to(torch.float64))
+    GS_NMSE_list = []
+    for i in range(iteration_number):
+        E = torch.fft.fftshift(torch.fft.fft2(torch.fft.fftshift(A)))
+        E_norm = energy_conserve(E.abs())
+        GS_NMSE_list.append((torch.nn.MSELoss(reduction="mean")(E_norm, target_field)).item() / (target_field**2).sum())
+        # save_image(r".\Output_GS\GS_recon_i_{}".format(i), E_norm)
+        E = target_field * torch.exp(1j * E.angle())
+        A = torch.fft.ifftshift(torch.fft.ifft2(torch.fft.ifftshift(E)))
+        A = torch.exp(1j * A.angle())
+    return GS_NMSE_list
