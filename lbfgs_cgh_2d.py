@@ -48,9 +48,7 @@ def optim_cgh_2d(target_field, distance=1, wavelength=0.000000532, pitch_size=0.
     torch.cuda.empty_cache()
     torch.manual_seed(0)
     device = torch.device("cuda" if cuda else "cpu")
-
     target_field = target_field.to(device)
-
     # Fixed unit amplitude
     amplitude = torch.ones(target_field.size(), requires_grad=False).to(torch.float64).to(device)
     # Random initial phase within [-pi, pi]
@@ -63,7 +61,6 @@ def optim_cgh_2d(target_field, distance=1, wavelength=0.000000532, pitch_size=0.
         optimiser = torch.optim.Adam([phase], lr=learning_rate)
     else:
         raise Exception("Optimiser is not recognised!")
-
 
     nmse_list = []
 
@@ -87,8 +84,8 @@ def optim_cgh_2d(target_field, distance=1, wavelength=0.000000532, pitch_size=0.
         nmse_list.append(nmse_value.data.tolist())
         # loss = loss_function(torch.flatten(reconstruction_normalised).expand(1, -1), torch.flatten(target_field).expand(1, -1))  # flatten 2D images into 1D array
         loss = loss_function(torch.flatten(reconstruction_normalised/target_field.max()).expand(1, -1), torch.flatten(target_field/target_field.max()).expand(1, -1))
-        loss.backward(retain_graph=True)
 
+        loss.backward(retain_graph=True)
         def closure():
             return loss
         optimiser.step(closure)
@@ -124,8 +121,6 @@ def main():
     if not os.path.isdir('Output_2D_iter'):
         os.makedirs('Output_2D_iter')
     save_image(r'.\Output_2D_iter\Target_field_normalised', target_field_normalised)
-
-
 
     hologram, nmse_list_SGD_MSE = optim_cgh_2d(
         target_field_normalised,
@@ -195,8 +190,6 @@ def main():
     time_elapsed = time.time() - time_start
     print("GD with RE:\t time elapsed = {:.3f}s,\t final NMSE = {:.15e}".format(time_elapsed, nmse_list_SGD_RE[-1]))
 
-
-
     # Carry out Adam optimisation with MSE as loss function
     time_start = time.time()
     hologram, nmse_list_Adam_MSE = optim_cgh_2d(
@@ -250,8 +243,6 @@ def main():
     )
     time_elapsed = time.time() - time_start
     print("Adam with RE:\t time elapsed = {:.3f}s,\t final NMSE = {:.15e}".format(time_elapsed, nmse_list_Adam_RE[-1]))
-
-
 
     # Carry out LBFGS optimisation with MSE as loss function
     time_start = time.time()
@@ -307,14 +298,11 @@ def main():
     time_elapsed = time.time() - time_start
     print("LBFGS with RE:\t time elapsed = {:.3f}s,\t final NMSE = {:.15e}".format(time_elapsed, nmse_list_LBFGS_RE[-1]))
 
-
-
     # Carry out Gerchberg Saxton for reference
     time_start = time.time()
     nmse_list_GS = gerchberg_saxton(target_field_normalised, iteration_number=NUM_ITERATIONS)
     time_elapsed = time.time() - time_start
     print("GS reference:\t time elapsed = {:.3f}s,\t final NMSE = {:.15e}".format(time_elapsed, nmse_list_GS[-1]))
-
 
     # Plot NMSE
     x_list = range(1, NUM_ITERATIONS + 1)
