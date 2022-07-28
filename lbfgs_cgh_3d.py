@@ -26,7 +26,8 @@ ENERGY_CONSERVATION_SCALING = 1.0
 NUM_ITERATIONS = 100
 LEARNING_RATE = 0.1
 RECORD_NMSE = True
-SEQUENTIAL_SLICING = True
+SEQUENTIAL_SLICING = False
+OPTIMISATION_ALGORITHM = "LBFGS"
 
 def lbfgs_cgh_3d(target_fields, distances, sequential_slicing=False, wavelength=0.000000532, pitch_size=0.0000136,
                  save_progress=False, iteration_number=20, cuda=False, learning_rate=0.1, record_nmse=True,
@@ -56,9 +57,9 @@ def lbfgs_cgh_3d(target_fields, distances, sequential_slicing=False, wavelength=
     amplitude = torch.ones(target_fields[0].size(), requires_grad=False).to(torch.float64).to(device)
     # Random initial phase within [-pi, pi]
     phase = ((torch.rand(target_fields[0].size()) * 2 - 1) * math.pi).to(torch.float64).detach().to(device).requires_grad_()
-    if optimise_algorithm.lower() == "lbfgs":
+    if optimise_algorithm.lower() in ["lbfgs", "l-bfgs"]:
         optimiser = torch.optim.LBFGS([phase], lr=learning_rate, history_size=10)
-    elif optimise_algorithm.lower() == "sgd":
+    elif optimise_algorithm.lower() in ["sgd", "gd"]:
         optimiser = torch.optim.SGD([phase], lr=learning_rate)
     elif optimise_algorithm.lower() == "adam":
         optimiser = torch.optim.Adam([phase], lr=learning_rate)
@@ -130,15 +131,11 @@ def lbfgs_cgh_3d(target_fields, distances, sequential_slicing=False, wavelength=
         for index, distance in enumerate(distances):
             reconstruction_abs = fresnel_propergation(hologram, distance, SLM_PITCH_SIZE, LASER_WAVELENGTH).abs()
             reconstruction_normalised = energy_conserve(reconstruction_abs, ENERGY_CONSERVATION_SCALING)
-            save_image(r'.\Output_3D_iter\LBFGS_recon_d_{}'.format(index), reconstruction_normalised.detach().cpu())
+            save_image(r'.\Output_3D_iter\LBFGS_recon_d_{}'.format(index), reconstruction_normalised.detach().cpu(), target_fields.detach().cpu().max())
 
     torch.no_grad()
     hologram = amplitude * torch.exp(1j * phase)
     return hologram.detach(), nmse_lists
-
-
-
-
 
 
 def main():
@@ -153,7 +150,7 @@ def main():
     # images = [r".\Target_images\A.png", r".\Target_images\B.png", r".\Target_images\C.png", r".\Target_images\D.png"]
     # images = [r".\Target_images\grey-scale-test.png", r".\Target_images\szzx1.png", r".\Target_images\guang.png", r".\Target_images\mandrill1.png"]
     images = [r".\Target_images\512_A.png", r".\Target_images\512_B.png", r".\Target_images\512_C.png", r".\Target_images\512_D.png"]
-    # images = [r".\Target_images\mandrill.png", r".\Target_images\512_guang.png", r".\Target_images\512_C.png", r".\Target_images\512_D.png"]
+    # images = [r".\Target_images\mandrill.png", r".\Target_images\512_B.png", r".\Target_images\512_szzx.png", r".\Target_images\512_D.png"]
     # Check for mismatch between numbers of distances and images given
     if len(distances) != len(images):
         raise Exception("Different numbers of distances and images are given!")
@@ -165,13 +162,13 @@ def main():
         target_field_normalised = energy_conserve(target_field, ENERGY_CONSERVATION_SCALING)
         target_fields_list.append(target_field_normalised)
     target_fields = torch.stack(target_fields_list)
-    print("save_image_dynamic_range", target_fields.max().tolist())
 
     # Check if output folder exists, then save copies of target_fields
     if not os.path.isdir('Output_3D_iter'):
         os.makedirs('Output_3D_iter')
     for i, target_field in enumerate(target_fields):
         save_image(r'.\Output_3D_iter\Target_field_{}'.format(i), target_field, target_fields.max())
+
 
     # Carry out optimisation
     time_start = time.time()
@@ -186,18 +183,17 @@ def main():
         cuda=True,
         learning_rate=LEARNING_RATE,
         record_nmse=RECORD_NMSE,
-        optimise_algorithm="LBFGS",
+        optimise_algorithm=OPTIMISATION_ALGORITHM,
         loss_function = torch.nn.MSELoss(reduction="sum")
-        # loss_function=torch.nn.CrossEntropyLoss(label_smoothing=0.0, reduction="sum")
-        # loss_function=torch.nn.KLDivLoss(reduction="sum")
     )
     time_elapsed = time.time() - time_start
-    to_print = "LBFGS with MSE:\t time elapsed = {:.3f}s".format(time_elapsed)
+    to_print = OPTIMISATION_ALGORITHM + " with MSE:\t time elapsed = {:.3f}s".format(time_elapsed)
     if RECORD_NMSE:
         for index, nmse_list in enumerate(nmse_lists):
-            plt.plot(range(1, len(nmse_list) + 1), nmse_list, 's:', label="L-BFGS optimiser with MSE loss: NMSE at distance {}".format(distances[index]))
+            plt.plot(range(1, len(nmse_list) + 1), nmse_list, '.:', label=OPTIMISATION_ALGORITHM+" optimisation with MSE loss (slice at distance={})".format(distances[index]))
             to_print += "\tNMSE_{} = {:.15e}".format(index, nmse_list[-1])
     print(to_print)
+    plt.gca().set_prop_cycle(None)
 
 
     time_start = time.time()
@@ -212,18 +208,17 @@ def main():
         cuda=True,
         learning_rate=LEARNING_RATE,
         record_nmse=RECORD_NMSE,
-        optimise_algorithm="LBFGS",
-        # loss_function = torch.nn.MSELoss(reduction="sum")
+        optimise_algorithm=OPTIMISATION_ALGORITHM,
         loss_function=torch.nn.CrossEntropyLoss(label_smoothing=0.0, reduction="sum")
-        # loss_function=torch.nn.KLDivLoss(reduction="sum")
     )
     time_elapsed = time.time() - time_start
-    to_print = "LBFGS with CE:\t time elapsed = {:.3f}s".format(time_elapsed)
+    to_print = OPTIMISATION_ALGORITHM + " with CE:\t time elapsed = {:.3f}s".format(time_elapsed)
     if RECORD_NMSE:
         for index, nmse_list in enumerate(nmse_lists):
-            plt.plot(range(1, len(nmse_list) + 1), nmse_list, 'x:', label="L-BFGS optimiser with CE loss: NMSE at distance {}".format(distances[index]))
+            plt.plot(range(1, len(nmse_list) + 1), nmse_list, '--', label=OPTIMISATION_ALGORITHM+" optimisation with CE loss (slice at distance={})".format(distances[index]))
             to_print += "\tNMSE_{} = {:.15e}".format(index, nmse_list[-1])
     print(to_print)
+    plt.gca().set_prop_cycle(None)
 
 
     time_start = time.time()
@@ -238,31 +233,27 @@ def main():
         cuda=True,
         learning_rate=LEARNING_RATE,
         record_nmse=RECORD_NMSE,
-        optimise_algorithm="LBFGS",
-        # loss_function = torch.nn.MSELoss(reduction="sum")
-        # loss_function=torch.nn.CrossEntropyLoss(label_smoothing=0.0, reduction="sum")
+        optimise_algorithm=OPTIMISATION_ALGORITHM,
         loss_function=torch.nn.KLDivLoss(reduction="sum")
     )
     time_elapsed = time.time() - time_start
-    to_print = "LBFGS with RE:\t time elapsed = {:.3f}s".format(time_elapsed)
+    to_print = OPTIMISATION_ALGORITHM + " with RE:\t time elapsed = {:.3f}s".format(time_elapsed)
     if RECORD_NMSE:
         for index, nmse_list in enumerate(nmse_lists):
-            plt.plot(range(1, len(nmse_list) + 1), nmse_list, '^:', label="L-BFGS optimiser with RE loss: NMSE at distance {}".format(distances[index]))
+            plt.plot(range(1, len(nmse_list) + 1), nmse_list, '-', label=OPTIMISATION_ALGORITHM+" optimisation with RE loss (slice at distance={})".format(distances[index]))
             to_print += "\tNMSE_{} = {:.15e}".format(index, nmse_list[-1])
     print(to_print)
 
-
-
-
-
-
-
-
-    plt.title("Optimisation of CGH for Fresnel diffraction")
+    if SEQUENTIAL_SLICING:
+        plt.title(OPTIMISATION_ALGORITHM + " optimisation of CGH with sequential slicing")
+    else:
+        plt.title(OPTIMISATION_ALGORITHM + " optimisation of CGH without sequential slicing")
     plt.xlabel("iterarion(s)")
     plt.ylabel("NMSE")
     plt.legend()
+    plt.subplots_adjust(left=0.03, right=0.99, top=0.97, bottom=0.05)
     plt.show()
+
 
 
 if __name__ == "__main__":

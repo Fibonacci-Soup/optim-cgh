@@ -54,7 +54,7 @@ def optim_cgh_2d(target_field, distance=1, wavelength=0.000000532, pitch_size=0.
     # Random initial phase within [-pi, pi]
     phase = ((torch.rand(target_field.size()) * 2 - 1) * math.pi).to(torch.float64).detach().to(device).requires_grad_()
     if optimise_algorithm.lower() == "lbfgs":
-        optimiser = torch.optim.LBFGS([{'params': [phase]}], lr=learning_rate, max_iter=1000)
+        optimiser = torch.optim.LBFGS([phase], lr=learning_rate)
     elif optimise_algorithm.lower() == "sgd":
         optimiser = torch.optim.SGD([phase], lr=learning_rate)
     elif optimise_algorithm.lower() == "adam":
@@ -86,6 +86,7 @@ def optim_cgh_2d(target_field, distance=1, wavelength=0.000000532, pitch_size=0.
         loss = loss_function(torch.flatten(reconstruction_normalised/target_field.max()).expand(1, -1), torch.flatten(target_field/target_field.max()).expand(1, -1))
 
         loss.backward(retain_graph=True)
+
         def closure():
             return loss
         optimiser.step(closure)
@@ -108,6 +109,63 @@ def optim_cgh_2d(target_field, distance=1, wavelength=0.000000532, pitch_size=0.
     torch.no_grad()
     hologram = amplitude * torch.exp(1j * phase)
     return hologram.detach(), nmse_list
+
+
+def summation_3d_hologram():
+    images = [r".\Target_images\512_A.png", r".\Target_images\512_B.png", r".\Target_images\512_C.png", r".\Target_images\512_D.png"]
+    distances = [.01, .02, .03, .04]
+
+    target_fields_list = []
+    for image_name in images:
+        target_field = torchvision.io.read_image(image_name, torchvision.io.ImageReadMode.GRAY).to(torch.float64)
+        target_field_normalised = energy_conserve(target_field, ENERGY_CONSERVATION_SCALING)
+        target_fields_list.append(target_field_normalised)
+    target_fields = torch.stack(target_fields_list)
+
+    total_hologram = torch.zeros(torchvision.io.read_image(images[0], torchvision.io.ImageReadMode.GRAY).size()).to(torch.float64)
+    hologram, nmse_list = optim_cgh_2d(
+            target_fields[0],
+            distance=distances[0],
+            wavelength=LASER_WAVELENGTH,
+            pitch_size=SLM_PITCH_SIZE,
+            save_progress=False,
+            iteration_number=NUM_ITERATIONS,
+            cuda=True,
+            learning_rate=LEARNING_RATE,
+            propagation_function=fresnel_propergation,  # Uncomment to choose Fresnel Propagation
+            optimise_algorithm="LBFGS",
+            # loss_function=torch.nn.MSELoss(reduction="sum")
+            loss_function=torch.nn.KLDivLoss(reduction="sum")
+        )
+    total_time_start = time.time()
+    for i, distance in enumerate(distances):
+        time_start = time.time()
+        hologram, nmse_list = optim_cgh_2d(
+            target_fields[i],
+            distance=distance,
+            wavelength=LASER_WAVELENGTH,
+            pitch_size=SLM_PITCH_SIZE,
+            save_progress=False,
+            iteration_number=NUM_ITERATIONS,
+            cuda=True,
+            learning_rate=LEARNING_RATE,
+            propagation_function=fresnel_propergation,  # Uncomment to choose Fresnel Propagation
+            optimise_algorithm="LBFGS",
+            # loss_function=torch.nn.MSELoss(reduction="sum")
+            loss_function=torch.nn.KLDivLoss(reduction="sum")
+        )
+        total_hologram = total_hologram + hologram.detach().cpu()
+        time_elapsed = time.time() - time_start
+        print("Optimise hologram for Slice {}:\t time elapsed = {:.3f}s,\t this slice's NMSE = {:.15e}".format(i, time_elapsed, nmse_list[-1]))
+
+    print("Total time taken for a summed hologram = {:.3f}s".format(time.time() - total_time_start))
+    # Save reconstructions at different distances to check defocus
+    total_phase_hologram = total_hologram.angle()
+    for i, distance in enumerate(distances):
+        reconstruction_abs = fresnel_propergation(torch.exp(1j*total_phase_hologram), distance, SLM_PITCH_SIZE, LASER_WAVELENGTH).abs()
+        reconstruction_normalised = energy_conserve(reconstruction_abs, ENERGY_CONSERVATION_SCALING)
+        print("Propagate the summed hologram to slice {}: NMSE = {:.15e}".format(i, (torch.nn.MSELoss(reduction="mean")(reconstruction_normalised, target_fields[i])).item() / (target_fields[i]**2).sum()))
+        save_image(r'.\Output_3D_iter\LBFGS_recon_naive_summation_defocused_at_{}'.format(distance), reconstruction_normalised, target_fields.max())
 
 
 def main():
@@ -326,4 +384,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    # main()
+    summation_3d_hologram()
