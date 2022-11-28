@@ -143,14 +143,17 @@ def main():
     Main function of lbfgs_cgh_3d
     """
 
-    # Set distances for each target image
-    distances = [.01, .02, .03, .04]
-
     # Set target images
     # images = [r".\Target_images\A.png", r".\Target_images\B.png", r".\Target_images\C.png", r".\Target_images\D.png"]
     # images = [r".\Target_images\grey-scale-test.png", r".\Target_images\szzx1.png", r".\Target_images\guang.png", r".\Target_images\mandrill1.png"]
     images = [r".\Target_images\512_A.png", r".\Target_images\512_B.png", r".\Target_images\512_C.png", r".\Target_images\512_D.png"]
     # images = [r".\Target_images\mandrill.png", r".\Target_images\512_B.png", r".\Target_images\512_szzx.png", r".\Target_images\512_D.png"]
+    # images = [r".\Target_images\512_A.png", r".\Target_images\512_B.png", r".\Target_images\512_C.png", r".\Target_images\512_D.png", r".\Target_images\512_A.png", r".\Target_images\512_B.png", r".\Target_images\512_C.png", r".\Target_images\512_D.png"]
+
+    # Set distances for each target image
+    distances = [.01, .02, .03, .04]
+    # distances = [.01, .02, .03, .04, .05,.06,.07,.08]
+
     # Check for mismatch between numbers of distances and images given
     if len(distances) != len(images):
         raise Exception("Different numbers of distances and images are given!")
@@ -183,16 +186,18 @@ def main():
         cuda=True,
         learning_rate=LEARNING_RATE,
         record_nmse=RECORD_NMSE,
-        optimise_algorithm=OPTIMISATION_ALGORITHM,
-        loss_function = torch.nn.MSELoss(reduction="sum")
+        optimise_algorithm="LBFGS",
+        loss_function=torch.nn.KLDivLoss(reduction="sum")
     )
     time_elapsed = time.time() - time_start
-    to_print = OPTIMISATION_ALGORITHM + " with MSE:\t time elapsed = {:.3f}s".format(time_elapsed)
+    to_print = "L-BFGS" + " with RE:\t time elapsed = {:.3f}s".format(time_elapsed)
     if RECORD_NMSE:
         for index, nmse_list in enumerate(nmse_lists):
-            plt.plot(range(1, len(nmse_list) + 1), nmse_list, '.:', label=OPTIMISATION_ALGORITHM+" optimisation with MSE loss (slice at distance={})".format(distances[index]))
-            to_print += "\tNMSE_{} = {:.15e}".format(index, nmse_list[-1])
+            plt.plot(range(1, len(nmse_list) + 1), nmse_list, '-', label="L-BFGS with RE (Slice {})".format(index + 1))
+            to_print += "\tNMSE_{} = {:.15e}".format(index + 1, nmse_list[-1])
     print(to_print)
+
+
     plt.gca().set_prop_cycle(None)
 
 
@@ -208,50 +213,28 @@ def main():
         cuda=True,
         learning_rate=LEARNING_RATE,
         record_nmse=RECORD_NMSE,
-        optimise_algorithm=OPTIMISATION_ALGORITHM,
-        loss_function=torch.nn.CrossEntropyLoss(label_smoothing=0.0, reduction="sum")
+        optimise_algorithm="GD",
+        # loss_function=torch.nn.KLDivLoss(reduction="sum")
+        loss_function = torch.nn.MSELoss(reduction="sum")
     )
     time_elapsed = time.time() - time_start
-    to_print = OPTIMISATION_ALGORITHM + " with CE:\t time elapsed = {:.3f}s".format(time_elapsed)
+    to_print = "GD" + " with RE:\t time elapsed = {:.3f}s".format(time_elapsed)
     if RECORD_NMSE:
         for index, nmse_list in enumerate(nmse_lists):
-            plt.plot(range(1, len(nmse_list) + 1), nmse_list, '--', label=OPTIMISATION_ALGORITHM+" optimisation with CE loss (slice at distance={})".format(distances[index]))
-            to_print += "\tNMSE_{} = {:.15e}".format(index, nmse_list[-1])
-    print(to_print)
-    plt.gca().set_prop_cycle(None)
-
-
-    time_start = time.time()
-    hologram, nmse_lists = lbfgs_cgh_3d(
-        target_fields,
-        distances,
-        sequential_slicing=SEQUENTIAL_SLICING,
-        wavelength=LASER_WAVELENGTH,
-        pitch_size=SLM_PITCH_SIZE,
-        save_progress=True,
-        iteration_number=NUM_ITERATIONS,
-        cuda=True,
-        learning_rate=LEARNING_RATE,
-        record_nmse=RECORD_NMSE,
-        optimise_algorithm=OPTIMISATION_ALGORITHM,
-        loss_function=torch.nn.KLDivLoss(reduction="sum")
-    )
-    time_elapsed = time.time() - time_start
-    to_print = OPTIMISATION_ALGORITHM + " with RE:\t time elapsed = {:.3f}s".format(time_elapsed)
-    if RECORD_NMSE:
-        for index, nmse_list in enumerate(nmse_lists):
-            plt.plot(range(1, len(nmse_list) + 1), nmse_list, '-', label=OPTIMISATION_ALGORITHM+" optimisation with RE loss (slice at distance={})".format(distances[index]))
-            to_print += "\tNMSE_{} = {:.15e}".format(index, nmse_list[-1])
+            plt.plot(range(1, len(nmse_list) + 1), nmse_list, '.--', label="GD with MSE (Slice {})".format(index + 1))
+            to_print += "\tNMSE_{} = {:.15e}".format(index + 1, nmse_list[-1])
     print(to_print)
 
     if SEQUENTIAL_SLICING:
-        plt.title(OPTIMISATION_ALGORITHM + " optimisation of CGH with sequential slicing")
+        plt.title("Iterations during optimisation of CGH with sequantial slicing technique")
     else:
-        plt.title(OPTIMISATION_ALGORITHM + " optimisation of CGH without sequential slicing")
+        plt.title("Iterations during optimisation of CGH without sequantial slicing technique")
+
     plt.xlabel("iterarion(s)")
     plt.ylabel("NMSE")
     plt.legend()
-    plt.subplots_adjust(left=0.03, right=0.99, top=0.97, bottom=0.05)
+    # plt.grid()
+    # plt.subplots_adjust(left=0.03, right=0.99, top=0.97, bottom=0.05)
     plt.show()
 
 

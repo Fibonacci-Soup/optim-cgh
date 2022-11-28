@@ -144,6 +144,16 @@ def fresnel_backward_propergation(field, distance=2, pitch_size=0.0000136, wavel
     u1 = U2 / h
     return u1
 
+def low_pass_filter_2d(img, filter_rate=1):
+    fft_img = torch.fft.fft2(img)
+    h = img.shape[-2]
+    w = img.shape[-1]
+    cy, cx = int(h/2), int(w/2) # centerness
+    rh, rw = int(filter_rate * cy), int(filter_rate * cx) # filter_size
+    fft_img[:, cy-rh:cy+rh, cx-rw:cx+rw] = 0
+    # fft_img[:, 0:cy-rh, 0:cx-rw] = 0
+    # fft_img[:, cy+rh:h, cx+rw:w] = 0
+    return torch.fft.ifft2(fft_img).abs()
 
 def save_image(filename, image_tensor, tensor_dynamic_range=None):
     if tensor_dynamic_range is None:

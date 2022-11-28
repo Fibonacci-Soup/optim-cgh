@@ -67,15 +67,21 @@ def optim_cgh_2d(target_field, distance=1, wavelength=0.000000532, pitch_size=0.
     for i in range(iteration_number):
         optimiser.zero_grad()
 
-        # Propagate hologram to reconstruction plane
+        ## Smooth the phase hologram
+        # blurrerd_phase = torchvision.transforms.functional.gaussian_blur(phase, kernel_size=23)
+        # save_image(r'.\Output_2D_iter\blurred_phase_i_{}'.format(i), blurrerd_phase.detach().cpu())
+        # hologram = amplitude * torch.exp(1j * blurrerd_phase)
+
         hologram = amplitude * torch.exp(1j * phase)
+
+        # Propagate hologram to reconstruction plane
         reconstruction_abs = propagation_function(hologram, distance, pitch_size, wavelength).abs()
         reconstruction_normalised = energy_conserve(reconstruction_abs, ENERGY_CONSERVATION_SCALING)
 
         # Save hologram and reconstruction every iteration, if needed
         if save_progress:
             # binary_phase_hologram = torch.where(phase > 0, 1, 0)
-            multi_phase_hologram = phase % SLM_PHASE_RANGE / SLM_PHASE_RANGE
+            multi_phase_hologram = hologram.angle() % SLM_PHASE_RANGE / SLM_PHASE_RANGE
             save_image(r'.\Output_2D_iter\holo_i_{}'.format(i), multi_phase_hologram.detach().cpu(), 1.0)
             save_image(r'.\Output_2D_iter\recon_i_{}'.format(i), reconstruction_normalised.detach().cpu(), target_field.detach().cpu().max())
 
@@ -112,7 +118,9 @@ def optim_cgh_2d(target_field, distance=1, wavelength=0.000000532, pitch_size=0.
 
 
 def summation_3d_hologram():
-    images = [r".\Target_images\512_A.png", r".\Target_images\512_B.png", r".\Target_images\512_C.png", r".\Target_images\512_D.png"]
+    # images = [r".\Target_images\512_A.png", r".\Target_images\512_B.png", r".\Target_images\512_C.png", r".\Target_images\512_D.png"]
+    images = [r".\Target_images\mandrill.png", r".\Target_images\512_B.png", r".\Target_images\512_szzx.png", r".\Target_images\512_D.png"]
+
     distances = [.01, .02, .03, .04]
 
     target_fields_list = []
@@ -124,19 +132,19 @@ def summation_3d_hologram():
 
     total_hologram = torch.zeros(torchvision.io.read_image(images[0], torchvision.io.ImageReadMode.GRAY).size()).to(torch.float64)
     hologram, nmse_list = optim_cgh_2d(
-            target_fields[0],
-            distance=distances[0],
-            wavelength=LASER_WAVELENGTH,
-            pitch_size=SLM_PITCH_SIZE,
-            save_progress=False,
+        target_fields[0],
+        distance=distances[0],
+        wavelength=LASER_WAVELENGTH,
+        pitch_size=SLM_PITCH_SIZE,
+        save_progress=False,
             iteration_number=NUM_ITERATIONS,
-            cuda=True,
-            learning_rate=LEARNING_RATE,
-            propagation_function=fresnel_propergation,  # Uncomment to choose Fresnel Propagation
+        cuda=True,
+        learning_rate=LEARNING_RATE,
+        propagation_function=fresnel_propergation,  # Uncomment to choose Fresnel Propagation
             optimise_algorithm="LBFGS",
-            # loss_function=torch.nn.MSELoss(reduction="sum")
-            loss_function=torch.nn.KLDivLoss(reduction="sum")
-        )
+        # loss_function=torch.nn.MSELoss(reduction="sum")
+        loss_function=torch.nn.KLDivLoss(reduction="sum")
+    )
     total_time_start = time.time()
     for i, distance in enumerate(distances):
         time_start = time.time()
@@ -156,23 +164,24 @@ def summation_3d_hologram():
         )
         total_hologram = total_hologram + hologram.detach().cpu()
         time_elapsed = time.time() - time_start
-        print("Optimise hologram for Slice {}:\t time elapsed = {:.3f}s,\t this slice's NMSE = {:.15e}".format(i, time_elapsed, nmse_list[-1]))
+        print("Optimise hologram for Slice {}:\t time elapsed = {:.3f}s,\t this slice's NMSE = {:.15e}".format(i+1, time_elapsed, nmse_list[-1]))
 
     print("Total time taken for a summed hologram = {:.3f}s".format(time.time() - total_time_start))
     # Save reconstructions at different distances to check defocus
     total_phase_hologram = total_hologram.angle()
+    save_image(r'.\Output_3D_iter\LBFGS_holo', total_phase_hologram.detach().cpu())
     for i, distance in enumerate(distances):
         reconstruction_abs = fresnel_propergation(torch.exp(1j*total_phase_hologram), distance, SLM_PITCH_SIZE, LASER_WAVELENGTH).abs()
         reconstruction_normalised = energy_conserve(reconstruction_abs, ENERGY_CONSERVATION_SCALING)
-        print("Propagate the summed hologram to slice {}: NMSE = {:.15e}".format(i, (torch.nn.MSELoss(reduction="mean")(reconstruction_normalised, target_fields[i])).item() / (target_fields[i]**2).sum()))
-        save_image(r'.\Output_3D_iter\LBFGS_recon_naive_summation_defocused_at_{}'.format(distance), reconstruction_normalised, target_fields.max())
+        print("Propagate the summed hologram to slice {}: NMSE = {:.15e}".format(i+1, (torch.nn.MSELoss(reduction="mean")(reconstruction_normalised, target_fields[i])).item() / (target_fields[i]**2).sum()))
+        save_image(r'.\Output_3D_iter\LBFGS_NB_SoH_recon_{}'.format(distance), reconstruction_normalised, target_fields.max())
 
 
 def main():
     """
     Main function of lbfgs_cgh_2d
     """
-    target_field = torchvision.io.read_image(r".\Target_images\mandrill.png", torchvision.io.ImageReadMode.GRAY).to(torch.float64)
+    target_field = torchvision.io.read_image(r".\Target_images\car_light.png", torchvision.io.ImageReadMode.GRAY).to(torch.float64)
     target_field_normalised = energy_conserve(target_field, ENERGY_CONSERVATION_SCALING)
 
     # Check if output folder exists, then save a copy of target_field
@@ -364,15 +373,15 @@ def main():
 
     # Plot NMSE
     x_list = range(1, NUM_ITERATIONS + 1)
-    plt.plot(x_list, nmse_list_SGD_MSE, 's--', label="GD optimiser with MSE loss")
-    plt.plot(x_list, nmse_list_SGD_CE, 'x--', label="GD optimiser with CE loss")
-    plt.plot(x_list, nmse_list_SGD_RE, '^--', label="GD optimiser with RE loss")
-    plt.plot(x_list, nmse_list_Adam_MSE, 's-.', label="Adam optimiser with MSE loss")
-    plt.plot(x_list, nmse_list_Adam_CE, 'x-.', label="Adam optimiser with CE loss")
-    plt.plot(x_list, nmse_list_Adam_RE, '^-.', label="Adam optimiser with RE loss")
-    plt.plot(x_list, nmse_list_LBFGS_MSE, 's:', label="L-BFGS optimiser with MSE loss")
-    plt.plot(x_list, nmse_list_LBFGS_CE, 'x:', label="L-BFGS optimiser with CE loss")
-    plt.plot(x_list, nmse_list_LBFGS_RE, '^:', label="L-BFGS optimiser with RE loss")
+    plt.plot(x_list, nmse_list_SGD_MSE, 'b-', label="GD optimiser with MSE loss")
+    plt.plot(x_list, nmse_list_SGD_CE, 'bx--', label="GD optimiser with CE loss")
+    plt.plot(x_list, nmse_list_SGD_RE, 'b^:', label="GD optimiser with RE loss")
+    plt.plot(x_list, nmse_list_Adam_MSE, 'g-', label="Adam optimiser with MSE loss")
+    plt.plot(x_list, nmse_list_Adam_CE, 'gx--', label="Adam optimiser with CE loss")
+    plt.plot(x_list, nmse_list_Adam_RE, 'g^:', label="Adam optimiser with RE loss")
+    plt.plot(x_list, nmse_list_LBFGS_MSE, 'r-', label="L-BFGS optimiser with MSE loss")
+    plt.plot(x_list, nmse_list_LBFGS_CE, 'rx--', label="L-BFGS optimiser with CE loss")
+    plt.plot(x_list, nmse_list_LBFGS_RE, 'r^:', label="L-BFGS optimiser with RE loss")
     plt.plot(x_list, nmse_list_GS, 'o--', label="Gerchberg Saxton Reference")
 
     plt.xticks(x_list)
