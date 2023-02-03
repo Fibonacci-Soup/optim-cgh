@@ -11,219 +11,272 @@ consisted of multiple slices of 2D images at different distances.
 
 import os
 import time
-import math
 import torch
 import torchvision
 import matplotlib.pyplot as plt
-from cgh_toolbox import save_image, fresnel_propergation, energy_conserve
+import numpy as np
+import cgh_toolbox
 
 # Experimental setup - device properties
-SLM_PHASE_RANGE = 2 * math.pi
-SLM_PITCH_SIZE = 0.0000136
-LASER_WAVELENGTH = 0.000000532
-
-ENERGY_CONSERVATION_SCALING = 1.0
-NUM_ITERATIONS = 100
-LEARNING_RATE = 0.1
-RECORD_NMSE = True
-SEQUENTIAL_SLICING = False
-OPTIMISATION_ALGORITHM = "LBFGS"
-
-def lbfgs_cgh_3d(target_fields, distances, sequential_slicing=False, wavelength=0.000000532, pitch_size=0.0000136,
-                 save_progress=False, iteration_number=20, cuda=False, learning_rate=0.1, record_nmse=True,
-                 optimise_algorithm="LBFGS", loss_function=torch.nn.MSELoss(reduction="sum")):
-    """
-    Carry out L-BFGS optimisation of CGH for a 3D target consisted of multiple slices of 2D images at different distances.
-    If sequential_slicing is True, Loss is calculated for reconstructions in all distances.
-    If sequential_slicing is False, Loss is calculated for reconstruction in each distance in turn for each iteration.
-
-    :param target_fields: tensor for target images
-    :param distances: image distances
-    :param sequential_slicing: decide whether to calculate loss function for each slice in turn instead of all slices
-    :param wavelength: wavelength of the light source
-    :param pitch_size: pitch size of the spatial light modulator (SLM)
-    :param save_progress: decide whether to save progress of every iteration to files
-    :param iteration_number: number of iterations
-    :param cuda: decide whether to use CUDA, use CPU otherwise
-    :param learning_rate: set the parameter 'lr' of torch.optim
-    :param loss_function: the objective function to minimise
-    :returns: resultant hologram
-    """
-    torch.cuda.empty_cache()
-    torch.manual_seed(0)
-    device = torch.device("cuda" if cuda else "cpu")
-    target_fields = target_fields.to(device)
-    # Fixed unit amplitude
-    amplitude = torch.ones(target_fields[0].size(), requires_grad=False).to(torch.float64).to(device)
-    # Random initial phase within [-pi, pi]
-    phase = ((torch.rand(target_fields[0].size()) * 2 - 1) * math.pi).to(torch.float64).detach().to(device).requires_grad_()
-    if optimise_algorithm.lower() in ["lbfgs", "l-bfgs"]:
-        optimiser = torch.optim.LBFGS([phase], lr=learning_rate, history_size=10)
-    elif optimise_algorithm.lower() in ["sgd", "gd"]:
-        optimiser = torch.optim.SGD([phase], lr=learning_rate)
-    elif optimise_algorithm.lower() == "adam":
-        optimiser = torch.optim.Adam([phase], lr=learning_rate)
-    else:
-        raise Exception("Optimiser is not recognised!")
-
-    nmse_lists = []
-    for distance in distances:
-        nmse_lists.append([])
-
-    for i in range(iteration_number):
-        optimiser.zero_grad()
-        hologram = amplitude * torch.exp(1j * phase)
-
-        if sequential_slicing:
-            # Propagate hologram for one distance only
-            slice_number = i % len(target_fields)
-            reconstruction_abs = fresnel_propergation(hologram, distances[slice_number], pitch_size, wavelength).abs()
-            reconstruction_normalised = energy_conserve(reconstruction_abs, ENERGY_CONSERVATION_SCALING)
-
-            # Calculate loss for the single slice
-            loss = loss_function(torch.flatten(reconstruction_normalised / target_fields[slice_number].max()).expand(1, -1),
-                                 torch.flatten(target_fields[slice_number] / target_fields[slice_number].max()).expand(1, -1))
-
-            # Record NMSE
-            if record_nmse:
-                for index, distance in enumerate(distances):
-                    reconstruction_abs = fresnel_propergation(hologram, distance, SLM_PITCH_SIZE, LASER_WAVELENGTH).abs()
-                    reconstruction_normalised = energy_conserve(reconstruction_abs, ENERGY_CONSERVATION_SCALING)
-                    nmse_value = (torch.nn.MSELoss(reduction="mean")(reconstruction_normalised, target_fields[index])).item() / (target_fields[index]**2).sum()
-                    nmse_lists[index].append(nmse_value.data.tolist())
-                    if save_progress:
-                        # Save reconstructions at all distances
-                        save_image(r'.\Output_3D_iter\recon_i_{}_d_{}'.format(i, index), reconstruction_normalised.detach().cpu(), target_fields.detach().cpu().max())
-        else:
-            # Propagate hologram for all distances
-            reconstructions_list = []
-            for index, distance in enumerate(distances):
-                reconstruction_abs = fresnel_propergation(hologram, distance=distance, pitch_size=pitch_size, wavelength=wavelength).abs()
-                reconstruction_normalised = energy_conserve(reconstruction_abs, ENERGY_CONSERVATION_SCALING)
-
-                # Record NMSE
-                if record_nmse:
-                    nmse_value = (torch.nn.MSELoss(reduction="mean")(reconstruction_normalised, target_fields[index])).item() / (target_fields[index]**2).sum()
-                    nmse_lists[index].append(nmse_value.data.tolist())
-                if save_progress:
-                    save_image(r'.\Output_3D_iter\recon_i_{}_d_{}'.format(i, index), reconstruction_normalised.detach().cpu(), target_fields.detach().cpu().max())
-
-                reconstructions_list.append(reconstruction_normalised)
-            reconstructions = torch.stack(reconstructions_list)
-
-            # Calculate loss for all slices (stacked in reconstructions)
-            loss = loss_function(torch.flatten(reconstructions / target_fields.max()).expand(1, -1),
-                                 torch.flatten(target_fields / target_fields.max()).expand(1, -1))
-
-        loss.backward(retain_graph=True)
-
-        def closure():
-            return loss
-        optimiser.step(closure)
-
-    # Save final results
-    if save_progress:
-        # Save final hologram
-        multi_phase_hologram = hologram.angle() % SLM_PHASE_RANGE / SLM_PHASE_RANGE
-        save_image(r'.\Output_3D_iter\LBFGS_holo_distances_{}'.format(distances), multi_phase_hologram.detach().cpu(), 1.0)
-
-        # Save reconstructions at all distances
-        for index, distance in enumerate(distances):
-            reconstruction_abs = fresnel_propergation(hologram, distance, SLM_PITCH_SIZE, LASER_WAVELENGTH).abs()
-            reconstruction_normalised = energy_conserve(reconstruction_abs, ENERGY_CONSERVATION_SCALING)
-            save_image(r'.\Output_3D_iter\LBFGS_recon_d_{}'.format(index), reconstruction_normalised.detach().cpu(), target_fields.detach().cpu().max())
-
-    torch.no_grad()
-    hologram = amplitude * torch.exp(1j * phase)
-    return hologram.detach(), nmse_lists
 
 
 def main():
     """
     Main function of lbfgs_cgh_3d
     """
+    # SLM and laser info
+    PITCH_SIZE = 0.00000425
+    WAVELENGTH = 0.0000006607
 
-    # Set target images
-    # images = [r".\Target_images\A.png", r".\Target_images\B.png", r".\Target_images\C.png", r".\Target_images\D.png"]
-    # images = [r".\Target_images\grey-scale-test.png", r".\Target_images\szzx1.png", r".\Target_images\guang.png", r".\Target_images\mandrill1.png"]
-    images = [r".\Target_images\512_A.png", r".\Target_images\512_B.png", r".\Target_images\512_C.png", r".\Target_images\512_D.png"]
-    # images = [r".\Target_images\mandrill.png", r".\Target_images\512_B.png", r".\Target_images\512_szzx.png", r".\Target_images\512_D.png"]
-    # images = [r".\Target_images\512_A.png", r".\Target_images\512_B.png", r".\Target_images\512_C.png", r".\Target_images\512_D.png", r".\Target_images\512_A.png", r".\Target_images\512_B.png", r".\Target_images\512_C.png", r".\Target_images\512_D.png"]
+    # NUM_SLICES = 720 #858-258
+    NUM_ITERATIONS = 100
+    SEQUENTIAL_SLICING = True
+    ENERGY_CONSERVATION_SCALING = 1.0
+    PLOT_EACH_SLICE = False
 
-    # Set distances for each target image
-    distances = [.01, .02, .03, .04]
-    # distances = [.01, .02, .03, .04, .05,.06,.07,.08]
 
-    # Check for mismatch between numbers of distances and images given
-    if len(distances) != len(images):
-        raise Exception("Different numbers of distances and images are given!")
-
-    # Load target images
     target_fields_list = []
-    for image_name in images:
-        target_field = torchvision.io.read_image(image_name, torchvision.io.ImageReadMode.GRAY).to(torch.float64)
-        target_field_normalised = energy_conserve(target_field, ENERGY_CONSERVATION_SCALING)
+
+    READ_TARGET_FIELD_FROM_FILE = True
+    if READ_TARGET_FIELD_FROM_FILE:
+        ## Load target images
+        # images = [r".\Target_images\A.png", r".\Target_images\B.png", r".\Target_images\C.png", r".\Target_images\D.png"]
+        # images = [r".\Target_images\grey-scale-test.png", r".\Target_images\szzx1.png", r".\Target_images\guang.png", r".\Target_images\mandrill1.png"]
+        # images = [r".\Target_images\512_A.png", r".\Target_images\512_B.png", r".\Target_images\512_C.png", r".\Target_images\512_D.png"]
+        images = [r".\Target_images\1080p_A.png", r".\Target_images\1080p_B.png", r".\Target_images\1080p_C.png", r".\Target_images\1080p_D.png"]
+        # images = [r".\Target_images\mandrill.png", r".\Target_images\512_B.png", r".\Target_images\512_szzx.png", r".\Target_images\512_D.png"]
+        # images = [r".\Target_images\512_A.png", r".\Target_images\512_B.png", r".\Target_images\512_C.png", r".\Target_images\512_D.png", r".\Target_images\512_E.png", r".\Target_images\512_F.png", r".\Target_images\512_G.png"]
+        # images = [r".\Target_images\Teapot_slices\Teapot_section_{}.png".format(858 - 1 - i) for i in range(0, NUM_SLICES, 20)]
+        # images = [r".\Target_images\512_A.png"]
+        for image_name in images:
+            target_field = torchvision.io.read_image(image_name, torchvision.io.ImageReadMode.GRAY).to(torch.float64)
+            # target_field = torch.nn.functional.interpolate(target_field.expand(1, -1, -1, -1), (1080, 1080))[0]
+            # target_field = cgh_toolbox.zero_pad_to_size(target_field, target_height=1080, target_width=1920)
+            target_field_normalised = cgh_toolbox.energy_conserve(target_field, ENERGY_CONSERVATION_SCALING)
+            target_fields_list.append(target_field_normalised)
+    else:
+        ## Generate target field
+        target_field = torch.from_numpy(cgh_toolbox.generate_grid_image(vertical_size=1080, horizontal_size=1920, vertical_spacing=20, horizontal_spacing=20))
+        # target_field = torch.nn.functional.interpolate(target_field.expand(1, -1, -1, -1), (1080, 1920))[0]
+        # target_field = cgh_toolbox.zero_pad_to_size(target_field, target_height=1920, target_width=1920)
+
+        target_field_normalised = cgh_toolbox.energy_conserve(target_field, ENERGY_CONSERVATION_SCALING)
         target_fields_list.append(target_field_normalised)
+
     target_fields = torch.stack(target_fields_list)
 
-    # Check if output folder exists, then save copies of target_fields
-    if not os.path.isdir('Output_3D_iter'):
-        os.makedirs('Output_3D_iter')
+    # for distance in np.arange(0.05, 1.01, 0.05):
+    ## Set distances for each target image
+    # distances = [0.5]
+    # distances = [.01, .02, .03, .04]
+    # distances = [0.01 + i*SLM_PITCH_SIZE for i in range(0, NUM_SLICES, 10)]
+    # distances = [0.09 + i*0.0001 for i in range(len(images))]
+    distances = [0.08, 0.15, 0.25, 0.5]
+
+    ## Check for mismatch between numbers of distances and images given
+    if len(distances) != len(target_fields):
+        raise Exception("Different numbers of distances and images are given!")
+
+    print("INFO: {} target fields loaded".format(len(target_fields)))
+
+    ## Check if output folder exists, then save copies of target_fields
+    if not os.path.isdir('Output'):
+        os.makedirs('Output')
     for i, target_field in enumerate(target_fields):
-        save_image(r'.\Output_3D_iter\Target_field_{}'.format(i), target_field, target_fields.max())
+        cgh_toolbox.save_image(r'.\Output\Target_field_{}'.format(i), target_field)
 
 
-    # Carry out optimisation
+    ## Carry out GS with SS
     time_start = time.time()
-    hologram, nmse_lists = lbfgs_cgh_3d(
+    hologram, nmse_lists_GS, time_list_GS = cgh_toolbox.gerchberg_saxton_3d_sequential_slicing(target_fields, distances, iteration_number=NUM_ITERATIONS, weighting=0, pitch_size=PITCH_SIZE, wavelength=WAVELENGTH)
+    time_elapsed = time.time() - time_start
+    to_print = "GS reference:\t time elapsed = {:.3f}s".format(time_elapsed)
+    # Save results to file
+    cgh_toolbox.save_hologram_and_its_recons(hologram, distances, "GS")
+    if PLOT_EACH_SLICE:
+        for index, nmse_list in enumerate(nmse_lists_GS):
+            plt.plot(range(1, NUM_ITERATIONS + 1), nmse_list, '--', label="GS with SS (Slice {})".format(index + 1))
+            to_print += "\tNMSE_{} = {:.15e}".format(index + 1, nmse_list[-1])
+        plt.xlabel("iterarion(s)")
+        plt.ylabel("NMSE")
+        plt.legend()
+        plt.show()
+    print(to_print)
+
+
+    ## Carry out DCGS
+    time_start = time.time()
+    hologram, nmse_lists_DCGS, time_list_DCGS = cgh_toolbox.gerchberg_saxton_3d_sequential_slicing(target_fields, distances, iteration_number=NUM_ITERATIONS, weighting=0.001, pitch_size=PITCH_SIZE, wavelength=WAVELENGTH)
+    time_elapsed = time.time() - time_start
+    to_print = "DCGS reference:\t time elapsed = {:.3f}s".format(time_elapsed)
+    # Save results to file
+    cgh_toolbox.save_hologram_and_its_recons(hologram, distances, "DCGS")
+    if PLOT_EACH_SLICE:
+        for index, nmse_list in enumerate(nmse_lists_DCGS):
+            plt.plot(range(1, NUM_ITERATIONS + 1), nmse_list, '--', label="DCGS (Slice {})".format(index + 1))
+            to_print += "\tNMSE_{} = {:.15e}".format(index + 1, nmse_list[-1])
+        plt.xlabel("iterarion(s)")
+        plt.ylabel("NMSE")
+        plt.legend()
+        plt.show()
+    print(to_print)
+
+
+    ## Carry out LBFGS with RE
+    time_start = time.time()
+    hologram, nmse_lists_LBFGS_RE, time_list_LBFGS_RE = cgh_toolbox.lbfgs_cgh_3d(
         target_fields,
         distances,
         sequential_slicing=SEQUENTIAL_SLICING,
-        wavelength=LASER_WAVELENGTH,
-        pitch_size=SLM_PITCH_SIZE,
+        save_progress=False,
+        iteration_number=NUM_ITERATIONS,
+        cuda=True,
+        learning_rate=0.01,
+        record_all_nmse=True,
+        optimise_algorithm="LBFGS",
+        grad_history_size=100,
+        loss_function=torch.nn.KLDivLoss(reduction="sum")
+        # loss_function=torch.nn.MSELoss(reduction="sum")
+    )
+    time_elapsed = time.time() - time_start
+    to_print = "L-BFGS with RE:\t time elapsed = {:.3f}s".format(time_elapsed)
+    # Save results to file
+    cgh_toolbox.save_hologram_and_its_recons(hologram, distances, "LBFGS_RE")
+    if PLOT_EACH_SLICE:
+        for index, nmse_list in enumerate(nmse_lists_LBFGS_RE):
+            plt.plot(range(1, NUM_ITERATIONS + 1), nmse_list, '-', label="L-BFGS with RE (Slice {})".format(index + 1))
+            to_print += "\tNMSE_{} = {:.15e}".format(index + 1, nmse_list[-1])
+        plt.xlabel("iterarion(s)")
+        plt.ylabel("NMSE")
+        plt.legend()
+        plt.show()
+    print(to_print)
+
+
+    '''
+    ## Carry out GD with MSE
+    time_start = time.time()
+    hologram, nmse_lists_GD_MSE = lbfgs_cgh_3d(
+        target_fields,
+        distances,
+        sequential_slicing=SEQUENTIAL_SLICING,
         save_progress=False,
         iteration_number=NUM_ITERATIONS,
         cuda=True,
         learning_rate=LEARNING_RATE,
-        record_nmse=RECORD_NMSE,
-        optimise_algorithm="LBFGS",
+        record_all_nmse=PLOT_EACH_SLICE,
+        optimise_algorithm="GD",
+        loss_function = torch.nn.MSELoss(reduction="sum")
+    )
+    time_elapsed = time.time() - time_start
+    to_print = "GD with MSE:\t time elapsed = {:.3f}s".format(time_elapsed)
+
+    if PLOT_EACH_SLICE:
+        for index, nmse_list in enumerate(nmse_lists_GD_MSE):
+            plt.plot(range(1, NUM_ITERATIONS + 1), nmse_list, '.--', label="GD with MSE (Slice {})".format(index + 1))
+            to_print += "\tNMSE_{} = {:.15e}".format(index + 1, nmse_list[-1])
+        plt.xlabel("iterarion(s)")
+        plt.ylabel("NMSE")
+        plt.legend()
+        plt.show()
+    print(to_print)
+
+
+
+    ## Carry out GD with RE
+    time_start = time.time()
+    hologram, nmse_lists_GD_RE = lbfgs_cgh_3d(
+        target_fields,
+        distances,
+        sequential_slicing=SEQUENTIAL_SLICING,
+        save_progress=False,
+        iteration_number=NUM_ITERATIONS,
+        cuda=True,
+        learning_rate=LEARNING_RATE,
+        record_all_nmse=PLOT_EACH_SLICE,
+        optimise_algorithm="GD",
         loss_function=torch.nn.KLDivLoss(reduction="sum")
     )
     time_elapsed = time.time() - time_start
-    to_print = "L-BFGS" + " with RE:\t time elapsed = {:.3f}s".format(time_elapsed)
-    if RECORD_NMSE:
-        for index, nmse_list in enumerate(nmse_lists):
-            plt.plot(range(1, len(nmse_list) + 1), nmse_list, '-', label="L-BFGS with RE (Slice {})".format(index + 1))
+    to_print = "GD with RE:\t time elapsed = {:.3f}s".format(time_elapsed)
+
+
+    if PLOT_EACH_SLICE:
+        for index, nmse_list in enumerate(nmse_lists_GD_RE):
+            plt.plot(range(1, NUM_ITERATIONS + 1), nmse_list, '.--', label="GD with RE (Slice {})".format(index + 1))
             to_print += "\tNMSE_{} = {:.15e}".format(index + 1, nmse_list[-1])
+        plt.xlabel("iterarion(s)")
+        plt.ylabel("NMSE")
+        plt.legend()
+        plt.show()
     print(to_print)
+
+
+
+    ## Carry out LBFGS with MSE
+    time_start = time.time()
+    hologram, nmse_lists_LBFGS_MSE = lbfgs_cgh_3d(
+        target_fields,
+        distances,
+        sequential_slicing=SEQUENTIAL_SLICING,
+        save_progress=False,
+        iteration_number=NUM_ITERATIONS,
+        cuda=True,
+        learning_rate=0.05,
+        record_all_nmse=PLOT_EACH_SLICE,
+        optimise_algorithm="LBFGS",
+        grad_history_size=10,
+        # loss_function=torch.nn.KLDivLoss(reduction="sum")
+        loss_function=torch.nn.MSELoss(reduction="sum")
+    )
+    time_elapsed = time.time() - time_start
+    to_print = "L-BFGS with MSE:\t time elapsed = {:.3f}s".format(time_elapsed)
+
+    if PLOT_EACH_SLICE:
+        for index, nmse_list in enumerate(nmse_lists_LBFGS_MSE):
+            plt.plot(range(1, NUM_ITERATIONS + 1), nmse_list, '-', label="L-BFGS with MSE (Slice {})".format(index + 1))
+            to_print += "\tNMSE_{} = {:.15e}".format(index + 1, nmse_list[-1])
+        plt.xlabel("iterarion(s)")
+        plt.ylabel("NMSE")
+        plt.legend()
+        plt.show()
+    print(to_print)
+    '''
+
+
+    ## Compare maximum difference across slices
+    plt.plot(range(1, NUM_ITERATIONS + 1), np.amax(nmse_lists_GS, axis=0) - np.amin(nmse_lists_GS, axis=0), label="GS")
+    plt.plot(range(1, NUM_ITERATIONS + 1), np.amax(nmse_lists_DCGS, axis=0) - np.amin(nmse_lists_DCGS, axis=0), label="DCGS")
+    # plt.plot(range(1, NUM_ITERATIONS + 1), np.amax(nmse_lists_GD_MSE, axis=0) - np.amin(nmse_lists_GD_MSE, axis=0), label="GD_MSE")
+    # plt.plot(range(1, NUM_ITERATIONS + 1), np.amax(nmse_lists_GD_RE, axis=0) - np.amin(nmse_lists_GD_RE, axis=0), label="GD_RE")
+    # plt.plot(range(1, NUM_ITERATIONS + 1), np.amax(nmse_lists_LBFGS_MSE, axis=0) - np.amin(nmse_lists_LBFGS_MSE, axis=0), label="LBFGS_MSE")
+    plt.plot(range(1, NUM_ITERATIONS + 1), np.amax(nmse_lists_LBFGS_RE, axis=0) - np.amin(nmse_lists_LBFGS_RE, axis=0), label="LBFGS_RE")
+    plt.xlabel("iterarion(s)")
+    plt.ylabel("Maximum difference of NMSE")
+    plt.legend()
+    plt.show()
+
+
+
+    ## Compare the average among slices
+    plt.plot(range(1, NUM_ITERATIONS + 1), np.mean(nmse_lists_GS, axis=0), label="GS")
+    plt.plot(range(1, NUM_ITERATIONS + 1), np.mean(nmse_lists_DCGS, axis=0), label="DCGS")
+    # plt.plot(range(1, NUM_ITERATIONS + 1), np.mean(nmse_lists_GD_MSE, axis=0), label="GD_MSE")
+    # plt.plot(range(1, NUM_ITERATIONS + 1), np.mean(nmse_lists_GD_RE, axis=0), label="GD_RE")
+    # plt.plot(range(1, NUM_ITERATIONS + 1), np.mean(nmse_lists_LBFGS_MSE, axis=0), label="LBFGS_MSE")
+    plt.plot(range(1, NUM_ITERATIONS + 1), np.mean(nmse_lists_LBFGS_RE, axis=0), label="LBFGS_RE")
+    plt.xlabel("iterarion(s)")
+    plt.ylabel("Average NMSE")
+    plt.legend()
+    plt.show()
+
+
+
+    return
 
 
     plt.gca().set_prop_cycle(None)
 
-
-    time_start = time.time()
-    hologram, nmse_lists = lbfgs_cgh_3d(
-        target_fields,
-        distances,
-        sequential_slicing=SEQUENTIAL_SLICING,
-        wavelength=LASER_WAVELENGTH,
-        pitch_size=SLM_PITCH_SIZE,
-        save_progress=False,
-        iteration_number=NUM_ITERATIONS,
-        cuda=True,
-        learning_rate=LEARNING_RATE,
-        record_nmse=RECORD_NMSE,
-        optimise_algorithm="GD",
-        # loss_function=torch.nn.KLDivLoss(reduction="sum")
-        loss_function = torch.nn.MSELoss(reduction="sum")
-    )
-    time_elapsed = time.time() - time_start
-    to_print = "GD" + " with RE:\t time elapsed = {:.3f}s".format(time_elapsed)
-    if RECORD_NMSE:
-        for index, nmse_list in enumerate(nmse_lists):
-            plt.plot(range(1, len(nmse_list) + 1), nmse_list, '.--', label="GD with MSE (Slice {})".format(index + 1))
-            to_print += "\tNMSE_{} = {:.15e}".format(index + 1, nmse_list[-1])
-    print(to_print)
 
     if SEQUENTIAL_SLICING:
         plt.title("Iterations during optimisation of CGH with sequantial slicing technique")
@@ -236,7 +289,6 @@ def main():
     # plt.grid()
     # plt.subplots_adjust(left=0.03, right=0.99, top=0.97, bottom=0.05)
     plt.show()
-
 
 
 if __name__ == "__main__":

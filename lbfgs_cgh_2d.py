@@ -14,7 +14,7 @@ import math
 import torch
 import torchvision
 import matplotlib.pyplot as plt
-from cgh_toolbox import save_image, fraunhofer_propergation, fresnel_propergation, energy_conserve, gerchberg_saxton
+from cgh_toolbox import save_image, fraunhofer_propergation, fresnel_propergation, energy_conserve, gerchberg_saxton, generate_quadradic_phase, generate_linear_phase
 
 # Experimental setup - device properties
 SLM_PHASE_RANGE = 2 * math.pi
@@ -24,6 +24,8 @@ LASER_WAVELENGTH = 0.000000532
 ENERGY_CONSERVATION_SCALING = 1.0
 NUM_ITERATIONS = 100
 LEARNING_RATE = 0.1
+
+SMOOTH_HOLOGRAM = True
 
 
 def optim_cgh_2d(target_field, distance=1, wavelength=0.000000532, pitch_size=0.0000136,
@@ -51,8 +53,14 @@ def optim_cgh_2d(target_field, distance=1, wavelength=0.000000532, pitch_size=0.
     target_field = target_field.to(device)
     # Fixed unit amplitude
     amplitude = torch.ones(target_field.size(), requires_grad=False).to(torch.float64).to(device)
-    # Random initial phase within [-pi, pi]
-    phase = ((torch.rand(target_field.size()) * 2 - 1) * math.pi).to(torch.float64).detach().to(device).requires_grad_()
+
+    if SMOOTH_HOLOGRAM:
+        phase = (torch.ones(target_field.size()) * generate_linear_phase([target_field.shape[-2], target_field.shape[-1]], 0.5)).to(torch.float64).detach().to(device).requires_grad_()
+        save_image(r'.\Output_2D_iter\initial_phase', phase.detach().cpu() % SLM_PHASE_RANGE)
+    else:
+        # Random initial phase within [-pi, pi]
+        phase = ((torch.rand(target_field.size()) * 2 - 1) * math.pi).to(torch.float64).detach().to(device).requires_grad_()
+
     if optimise_algorithm.lower() == "lbfgs":
         optimiser = torch.optim.LBFGS([phase], lr=learning_rate)
     elif optimise_algorithm.lower() == "sgd":
@@ -68,11 +76,12 @@ def optim_cgh_2d(target_field, distance=1, wavelength=0.000000532, pitch_size=0.
         optimiser.zero_grad()
 
         ## Smooth the phase hologram
-        # blurrerd_phase = torchvision.transforms.functional.gaussian_blur(phase, kernel_size=23)
-        # save_image(r'.\Output_2D_iter\blurred_phase_i_{}'.format(i), blurrerd_phase.detach().cpu())
-        # hologram = amplitude * torch.exp(1j * blurrerd_phase)
-
-        hologram = amplitude * torch.exp(1j * phase)
+        if SMOOTH_HOLOGRAM:
+            blurrerd_phase = torchvision.transforms.functional.gaussian_blur(phase, kernel_size=23)
+            # save_image(r'.\Output_2D_iter\blurred_phase_i_{}'.format(i), blurrerd_phase.detach().cpu())
+            hologram = amplitude * torch.exp(1j * blurrerd_phase)
+        else:
+            hologram = amplitude * torch.exp(1j * phase)
 
         # Propagate hologram to reconstruction plane
         reconstruction_abs = propagation_function(hologram, distance, pitch_size, wavelength).abs()
@@ -97,7 +106,7 @@ def optim_cgh_2d(target_field, distance=1, wavelength=0.000000532, pitch_size=0.
             return loss
         optimiser.step(closure)
 
-    if save_progress:
+    if save_progress or True:
         with open(r'Output_2D_iter\NMSE_History.txt', 'w') as nmse_file:
             for each_nmse in nmse_list:
                 nmse_file.write(str(each_nmse) + '\n')
@@ -181,13 +190,35 @@ def main():
     """
     Main function of lbfgs_cgh_2d
     """
-    target_field = torchvision.io.read_image(r".\Target_images\car_light.png", torchvision.io.ImageReadMode.GRAY).to(torch.float64)
+    target_field = torchvision.io.read_image(r".\Target_images\LB.png", torchvision.io.ImageReadMode.GRAY).to(torch.float64)
     target_field_normalised = energy_conserve(target_field, ENERGY_CONSERVATION_SCALING)
 
     # Check if output folder exists, then save a copy of target_field
     if not os.path.isdir('Output_2D_iter'):
         os.makedirs('Output_2D_iter')
     save_image(r'.\Output_2D_iter\Target_field_normalised', target_field_normalised)
+
+    if SMOOTH_HOLOGRAM:
+        # Carry out LBFGS optimisation with RE as loss function
+        time_start = time.time()
+        hologram, nmse_list_LBFGS_RE = optim_cgh_2d(
+            target_field_normalised,
+            wavelength=LASER_WAVELENGTH,
+            pitch_size=SLM_PITCH_SIZE,
+            save_progress=False,
+            iteration_number=NUM_ITERATIONS,
+            cuda=True,
+            learning_rate=LEARNING_RATE,
+            propagation_function=fraunhofer_propergation,  # Uncomment to choose Fraunhofer propagation
+            # propagation_function=fresnel_propergation, # Uncomment to choose Fresnel Propagation
+            optimise_algorithm="LBFGS",
+            loss_function=torch.nn.KLDivLoss(reduction="sum")
+            # loss_function=torch.nn.MSELoss(reduction="sum")
+        )
+        time_elapsed = time.time() - time_start
+        print("LBFGS with RE:\t time elapsed = {:.3f}s,\t final NMSE = {:.15e}".format(time_elapsed, nmse_list_LBFGS_RE[-1]))
+        return
+
 
     hologram, nmse_list_SGD_MSE = optim_cgh_2d(
         target_field_normalised,
@@ -393,5 +424,5 @@ def main():
 
 
 if __name__ == "__main__":
-    # main()
-    summation_3d_hologram()
+    main()
+    # summation_3d_hologram()
