@@ -65,13 +65,16 @@ def hologram_encoding_gamma_correct_linear(gamma_correct_me, pre_gamma_grey_valu
 
 
 def save_hologram_and_its_recons(hologram, distances, alg_name, pitch_size=DEFAULT_PITCH_SIZE, wavelength=DEFAULT_WAVELENGTH):
-    phase_hologram = hologram.detach().cpu().angle() % (2*math.pi) / (2*math.pi)
+    print("phase mean: ", hologram.angle().mean().item(), "max: ", hologram.angle().max().item(), "min: ", hologram.angle().min().item())
+    phase_hologram = hologram.detach().cpu().angle() % (2*math.pi) / (2*math.pi) * 255.0
+    print("encoded holo mean: ", phase_hologram.mean().item(), "max: ", phase_hologram.max().item(), "min: ", phase_hologram.min().item())
     if not os.path.isdir('Output\{}'.format(alg_name)):
         os.makedirs('Output\{}'.format(alg_name))
-    save_image('.\Output\{0}\{0}_holo_{1:.2f}m'.format(alg_name, distances[0]), phase_hologram, 1.0)
-    gamma_corrected_phase_hologram = hologram_encoding_gamma_correct_linear(phase_hologram * 255.0)
+    save_image('.\Output\{0}\{0}_holo_{1:.2f}m'.format(alg_name, distances[0]), phase_hologram, 255.0)
+    gamma_corrected_phase_hologram = hologram_encoding_gamma_correct_linear(phase_hologram)
+    print("Sony holo mean: ", gamma_corrected_phase_hologram.mean().item(), "max: ", gamma_corrected_phase_hologram.max().item(), "min: ", gamma_corrected_phase_hologram.min().item())
     save_image('.\Output\{0}\{0}_sony_holo_{1:.2f}m'.format(alg_name, distances[0]), gamma_corrected_phase_hologram, 255.0)
-    save_image('.\Output\{0}\{0}_sony_holo_{1:.2f}m_cropped'.format(alg_name, distances[0]), torchvision.transforms.CenterCrop((1080, 1920))(gamma_corrected_phase_hologram), 255.0)
+    # save_image('.\Output\{0}\{0}_sony_holo_{1:.2f}m_cropped'.format(alg_name, distances[0]), torchvision.transforms.CenterCrop((1080, 1920))(gamma_corrected_phase_hologram), 255.0)
     for distance in distances:
         reconstruction_abs = fresnel_propergation(hologram, distance, pitch_size=pitch_size, wavelength=wavelength).abs()
         reconstruction_normalised = energy_conserve(reconstruction_abs)
@@ -240,8 +243,6 @@ def energy_match(field, target_field):
 
 
 def gerchberg_saxton_fraunhofer(target_field, iteration_number=50):
-    # if not os.path.isdir('Output_GS'):
-    #     os.makedirs('Output_GS')
     torch.manual_seed(0)
     A = torch.exp(1j * ((torch.rand(target_field.size()) * 2 - 1) * math.pi).to(torch.float64))
     GS_NMSE_list = []
@@ -252,12 +253,10 @@ def gerchberg_saxton_fraunhofer(target_field, iteration_number=50):
         E = target_field * torch.exp(1j * E.angle())
         A = torch.fft.ifftshift(torch.fft.ifft2(torch.fft.ifftshift(E)))
         A = torch.exp(1j * A.angle())
-    return GS_NMSE_list
+    return A, GS_NMSE_list
 
 
 def gerchberg_saxton_fraunhofer_smooth(target_field, iteration_number=50):
-    # if not os.path.isdir('Output_GS'):
-    #     os.makedirs('Output_GS')
     torch.manual_seed(0)
     A = torch.exp(1j * ((torch.rand(target_field.size()) * 2 - 1) * math.pi).to(torch.float64))
     GS_NMSE_list = []
@@ -265,14 +264,12 @@ def gerchberg_saxton_fraunhofer_smooth(target_field, iteration_number=50):
         E = torch.fft.fftshift(torch.fft.fft2(torch.fft.fftshift(A)))
         E_norm = energy_conserve(E.abs())
         GS_NMSE_list.append((torch.nn.MSELoss(reduction="mean")(E_norm, target_field)).item() / (target_field**2).sum())
-        # save_image(r".\Output_GS\GS_recon_i_{}".format(i), E_norm)
         E = target_field * torch.exp(1j * E.angle())
         A = torch.fft.ifftshift(torch.fft.ifft2(torch.fft.ifftshift(E)))
         # Smooth the phase hologram
-        A_blurred = torchvision.transforms.functional.gaussian_blur(A.angle(), kernel_size=11)
-        # save_image(r'.\Output_2D_iter\blurred_phase_i_{}'.format(i), blurrerd_phase.detach().cpu())
+        A_blurred = torchvision.transforms.functional.gaussian_blur(A.angle(), kernel_size=3)
         A = torch.exp(1j * A_blurred)
-    return GS_NMSE_list
+    return A, GS_NMSE_list
 
 
 def gerchberg_saxton_3d_sequential_slicing(target_fields, distances, iteration_number=50, weighting=0.001, time_limit=None, pitch_size=DEFAULT_PITCH_SIZE, wavelength=DEFAULT_WAVELENGTH):
@@ -321,8 +318,9 @@ def gerchberg_saxton_3d_sequential_slicing(target_fields, distances, iteration_n
 
 
 def lbfgs_cgh_3d(target_fields, distances, sequential_slicing=False, wavelength=DEFAULT_WAVELENGTH, pitch_size=DEFAULT_PITCH_SIZE,
-                 save_progress=False, iteration_number=20, cuda=False, learning_rate=0.1, record_all_nmse=True,
-                 optimise_algorithm="LBFGS", grad_history_size=10, loss_function=torch.nn.MSELoss(reduction="sum"), energy_conserv_scaling=1.0, time_limit=None):
+                 save_progress=False, iteration_number=20, cuda=False, learning_rate=0.1, record_all_nmse=True, optimise_algorithm="LBFGS",
+                 grad_history_size=10, loss_function=torch.nn.MSELoss(reduction="sum"), energy_conserv_scaling=1.0, time_limit=None,
+                 initial_phase='random', smooth_holo_kernel_size=None):
     """
     Carry out L-BFGS optimisation of CGH for a 3D target consisted of multiple slices of 2D images at different distances.
     If sequential_slicing is True, Loss is calculated for reconstructions in all distances.
@@ -345,19 +343,27 @@ def lbfgs_cgh_3d(target_fields, distances, sequential_slicing=False, wavelength=
     torch.manual_seed(0)
     device = torch.device("cuda" if cuda else "cpu")
     target_fields = target_fields.to(device)
+
     # Fixed unit amplitude
     amplitude = torch.ones(target_fields[0].size(), requires_grad=False).to(torch.float64).to(device)
 
-    # Random initial phase within [-pi, pi]
-    phase = ((torch.rand(target_fields[0].size()) * 2 - 1) * math.pi).to(torch.float64).detach().to(device).requires_grad_()
-    # phase = (torch.ones(target_fields[0].size()) * generate_quadradic_phase([target_fields[0].shape[-2], target_fields[0].shape[-1]], 0.00002)).to(torch.float64).detach().to(device).requires_grad_()
-    # save_image(r'.\Output_3D_iter\initial_phase', phase.detach().cpu() % (2*math.pi))
+    # Variable phase
+    if initial_phase.lower() in ['random', 'rand']:
+        # Random initial phase within [-pi, pi]
+        phase = ((torch.rand(target_fields[0].size()) * 2 - 1) * math.pi).to(torch.float64).detach().to(device).requires_grad_()
+    elif initial_phase.lower() in ['linear', 'lin']:
+        # linear initial phase
+        phase = (torch.ones(target_fields[0].size()) * generate_linear_phase([target_fields[0].shape[-2], target_fields[0].shape[-1]], 0.5)).to(torch.float64).detach().to(device).requires_grad_()
+    elif initial_phase.lower() in ['quadratic', 'quad']:
+        # linear initial phase
+        phase = (torch.ones(target_fields[0].size()) * generate_quadradic_phase([target_fields[0].shape[-2], target_fields[0].shape[-1]], 0.00002)).to(torch.float64).detach().to(device).requires_grad_()
+    else:
+        raise Exception("The required initial phase is not recognised!")
 
+    # Decide optimisation algorithm
     if optimise_algorithm.lower() in ["lbfgs", "l-bfgs"]:
-        # print("LBFGS optimisation start")
         optimiser = torch.optim.LBFGS([phase], lr=learning_rate, history_size=grad_history_size)
     elif optimise_algorithm.lower() in ["sgd", "gd"]:
-        # print("GD optimisation start")
         optimiser = torch.optim.SGD([phase], lr=learning_rate)
     elif optimise_algorithm.lower() == "adam":
         optimiser = torch.optim.Adam([phase], lr=learning_rate)
@@ -371,14 +377,15 @@ def lbfgs_cgh_3d(target_fields, distances, sequential_slicing=False, wavelength=
 
     for i in range(iteration_number):
         optimiser.zero_grad()
-        hologram = amplitude * torch.exp(1j * phase)
+        if smooth_holo_kernel_size is not None:
+            # Smooth the phase hologram
+            blurrerd_phase = torchvision.transforms.functional.gaussian_blur(phase, kernel_size=smooth_holo_kernel_size)
+            hologram = amplitude * torch.exp(1j * blurrerd_phase)
+        else:
+            hologram = amplitude * torch.exp(1j * phase)
 
         if sequential_slicing:
             # Propagate hologram for one distance only
-            # if (i // len(target_fields)) % 2 == 0:
-            #     slice_number = i % len(target_fields)
-            # else:
-            #     slice_number = len(target_fields) - 1 - (i % len(target_fields))
             slice_number = i % len(target_fields)
             reconstruction_abs = fresnel_propergation(hologram, distances[slice_number], pitch_size, wavelength).abs()
             reconstruction_normalised = energy_conserve(reconstruction_abs, energy_conserv_scaling)
