@@ -30,7 +30,7 @@ def main():
 
     # NUM_SLICES = 720 #858-258
     NUM_ITERATIONS = 100
-    SEQUENTIAL_SLICING = True
+    SEQUENTIAL_SLICING = False
     ENERGY_CONSERVATION_SCALING = 1.0
     PLOT_EACH_SLICE = False
 
@@ -46,10 +46,11 @@ def main():
         # images = [r".\Target_images\mandrill.png", r".\Target_images\512_B.png", r".\Target_images\512_szzx.png", r".\Target_images\512_D.png"]
         # images = [r".\Target_images\512_A.png", r".\Target_images\512_B.png", r".\Target_images\512_C.png", r".\Target_images\512_D.png", r".\Target_images\512_E.png", r".\Target_images\512_F.png", r".\Target_images\512_G.png"]
         # images = [r".\Target_images\Teapot_slices\Teapot_section_{}.png".format(858 - 1 - i) for i in range(0, NUM_SLICES, 20)]
-        images = [r".\Target_images\sony_logo_1080x1080.jpg"]
+        # images = [r".\Target_images\sony_logo_1080x1080.jpg"]
+        images = [r".\Target_images\mandrill.png"]
         for image_name in images:
             target_field = torchvision.io.read_image(image_name, torchvision.io.ImageReadMode.GRAY).to(torch.float64)
-            target_field = torch.nn.functional.interpolate(target_field.expand(1, -1, -1, -1), (1080, 1920))[0]
+            target_field = torch.nn.functional.interpolate(target_field.expand(1, -1, -1, -1), (1080, 1080))[0]
             # target_field = cgh_toolbox.zero_pad_to_size(target_field, target_height=1080, target_width=1920)
             target_field_normalised = cgh_toolbox.energy_conserve(target_field, ENERGY_CONSERVATION_SCALING)
             target_fields_list.append(target_field_normalised)
@@ -85,59 +86,12 @@ def main():
         cgh_toolbox.save_image(r'.\Output\Target_field_{}'.format(i), target_field)
 
 
-    # hologram, nmse_lists_GS = cgh_toolbox.gerchberg_saxton_fraunhofer(target_fields[0])
-    # cgh_toolbox.save_hologram_and_its_recons(hologram, [9999999], "GS")
-    # hologram, nmse_lists_GS = cgh_toolbox.gerchberg_saxton_fraunhofer_smooth(target_fields[0])
-    # cgh_toolbox.save_hologram_and_its_recons(hologram, [9999999], "GS_smooth")
-
-
-    # Carry out GS with SS
-    time_start = time.time()
-    hologram, nmse_lists_GS, time_list_GS = cgh_toolbox.gerchberg_saxton_3d_sequential_slicing(
-        target_fields, distances, iteration_number=NUM_ITERATIONS, weighting=0, pitch_size=PITCH_SIZE, wavelength=WAVELENGTH)
-    time_elapsed = time.time() - time_start
-    to_print = "GS reference:\t time elapsed = {:.3f}s".format(time_elapsed)
-    # Save results to file
-    cgh_toolbox.save_hologram_and_its_recons(hologram, distances, "GS")
-    if PLOT_EACH_SLICE:
-        for index, nmse_list in enumerate(nmse_lists_GS):
-            plt.plot(range(1, NUM_ITERATIONS + 1), nmse_list, '--', label="GS with SS (Slice {})".format(index + 1))
-            to_print += "\tNMSE_{} = {:.15e}".format(index + 1, nmse_list[-1])
-        plt.xlabel("iterarion(s)")
-        plt.ylabel("NMSE")
-        plt.legend()
-        plt.show()
-    print(to_print)
-
-
-
-    # Carry out DCGS
-    time_start = time.time()
-    hologram, nmse_lists_DCGS, time_list_DCGS = cgh_toolbox.gerchberg_saxton_3d_sequential_slicing(
-        target_fields, distances, iteration_number=NUM_ITERATIONS, weighting=0.001, pitch_size=PITCH_SIZE, wavelength=WAVELENGTH)
-    time_elapsed = time.time() - time_start
-    to_print = "DCGS reference:\t time elapsed = {:.3f}s".format(time_elapsed)
-    # Save results to file
-    cgh_toolbox.save_hologram_and_its_recons(hologram, distances, "DCGS")
-    if PLOT_EACH_SLICE:
-        for index, nmse_list in enumerate(nmse_lists_DCGS):
-            plt.plot(range(1, NUM_ITERATIONS + 1), nmse_list, '--', label="DCGS (Slice {})".format(index + 1))
-            to_print += "\tNMSE_{} = {:.15e}".format(index + 1, nmse_list[-1])
-        plt.xlabel("iterarion(s)")
-        plt.ylabel("NMSE")
-        plt.legend()
-        plt.show()
-    print(to_print)
-
-
-
     # Carry out GD with MSE
     time_start = time.time()
-    hologram, nmse_lists_GD_MSE, time_list_GD_MSE = cgh_toolbox.lbfgs_cgh_3d(
+    hologram, nmse_lists_GD_MSE, time_list_GD_MSE = cgh_toolbox.multi_frame_cgh(
         target_fields,
         distances,
         sequential_slicing=SEQUENTIAL_SLICING,
-        save_progress=False,
         iteration_number=NUM_ITERATIONS,
         cuda=True,
         learning_rate=0.01,
@@ -148,7 +102,7 @@ def main():
     time_elapsed = time.time() - time_start
     to_print = "GD with MSE:\t time elapsed = {:.3f}s".format(time_elapsed)
     # Save results to file
-    cgh_toolbox.save_hologram_and_its_recons(hologram, distances, "GD_MSE")
+    # cgh_toolbox.save_hologram_and_its_recons(hologram, distances, "GD_MSE")
     if PLOT_EACH_SLICE:
         for index, nmse_list in enumerate(nmse_lists_GD_MSE):
             plt.plot(range(1, NUM_ITERATIONS + 1), nmse_list, '.--', label="GD with MSE (Slice {})".format(index + 1))
@@ -159,13 +113,13 @@ def main():
         plt.show()
     print(to_print)
 
+
     # Carry out LBFGS with RE
     time_start = time.time()
-    hologram, nmse_lists_LBFGS_RE, time_list_LBFGS_RE = cgh_toolbox.lbfgs_cgh_3d(
+    hologram, nmse_lists_LBFGS_RE, time_list_LBFGS_RE = cgh_toolbox.multi_frame_cgh(
         target_fields,
         distances,
         sequential_slicing=SEQUENTIAL_SLICING,
-        save_progress=False,
         iteration_number=NUM_ITERATIONS,
         cuda=True,
         learning_rate=0.01,
@@ -178,7 +132,7 @@ def main():
     time_elapsed = time.time() - time_start
     to_print = "L-BFGS with RE:\t time elapsed = {:.3f}s".format(time_elapsed)
     # Save results to file
-    cgh_toolbox.save_hologram_and_its_recons(hologram, distances, "LBFGS_RE")
+    # cgh_toolbox.save_hologram_and_its_recons(hologram, distances, "LBFGS_RE")
     if PLOT_EACH_SLICE:
         for index, nmse_list in enumerate(nmse_lists_LBFGS_RE):
             plt.plot(range(1, NUM_ITERATIONS + 1), nmse_list, '-', label="L-BFGS with RE (Slice {})".format(index + 1))
@@ -190,26 +144,6 @@ def main():
     print(to_print)
 
 
-
-    # Compare maximum difference across slices
-    plt.plot(range(1, NUM_ITERATIONS + 1), np.amax(nmse_lists_GS, axis=0) - np.amin(nmse_lists_GS, axis=0), label="GS")
-    plt.plot(range(1, NUM_ITERATIONS + 1), np.amax(nmse_lists_DCGS, axis=0) - np.amin(nmse_lists_DCGS, axis=0), label="DCGS")
-    plt.plot(range(1, NUM_ITERATIONS + 1), np.amax(nmse_lists_GD_MSE, axis=0) - np.amin(nmse_lists_GD_MSE, axis=0), label="GD_MSE")
-    plt.plot(range(1, NUM_ITERATIONS + 1), np.amax(nmse_lists_LBFGS_RE, axis=0) - np.amin(nmse_lists_LBFGS_RE, axis=0), label="LBFGS_RE")
-    plt.xlabel("iterarion(s)")
-    plt.ylabel("Maximum difference of NMSE")
-    plt.legend()
-    plt.show()
-
-    # Compare the average among slices
-    plt.plot(range(1, NUM_ITERATIONS + 1), np.mean(nmse_lists_GS, axis=0), label="GS")
-    plt.plot(range(1, NUM_ITERATIONS + 1), np.mean(nmse_lists_DCGS, axis=0), label="DCGS")
-    plt.plot(range(1, NUM_ITERATIONS + 1), np.mean(nmse_lists_GD_MSE, axis=0), label="GD_MSE")
-    plt.plot(range(1, NUM_ITERATIONS + 1), np.mean(nmse_lists_LBFGS_RE, axis=0), label="LBFGS_RE")
-    plt.xlabel("iterarion(s)")
-    plt.ylabel("Average NMSE")
-    plt.legend()
-    plt.show()
 
     return
 
