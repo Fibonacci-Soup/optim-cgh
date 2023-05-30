@@ -476,7 +476,7 @@ def save_multi_frame_holograms_and_their_recons(holograms, reconstructions=None,
 
 
 def multi_frame_cgh(target_fields, distances, wavelength=DEFAULT_WAVELENGTH, pitch_size=DEFAULT_PITCH_SIZE,
-                 iteration_number=20, cuda=False, learning_rate=0.1, record_all_nmse=True, optimise_algorithm="LBFGS",
+                 iteration_number=20, cuda=False, learning_rate=0.1, save_progress=True, optimise_algorithm="LBFGS",
                  grad_history_size=10, loss_function=torch.nn.MSELoss(reduction="sum"), energy_conserv_scaling=1.0, time_limit=None,
                  num_frames=8):
 
@@ -487,10 +487,10 @@ def multi_frame_cgh(target_fields, distances, wavelength=DEFAULT_WAVELENGTH, pit
     target_fields = target_fields.to(device)
 
     # Fixed unit amplitude
-    amplitude = torch.ones(target_fields[0].size(), requires_grad=False).to(torch.float64).to(device)
+    amplitude = torch.ones(target_fields[0].size(), requires_grad=False).to(torch.float32).to(device)
 
     # Multi-frame phases
-    phases = ((torch.rand([num_frames] + list(target_fields[0].size())) * 2 - 1) * math.pi).to(torch.float64).detach().to(device).requires_grad_()
+    phases = ((torch.rand([num_frames] + list(target_fields[0].size())) * 2 - 1) * math.pi).to(torch.float32).detach().to(device).requires_grad_()
 
     # Decide optimisation algorithm
     if optimise_algorithm.lower() in ["lbfgs", "l-bfgs"]:
@@ -517,10 +517,12 @@ def multi_frame_cgh(target_fields, distances, wavelength=DEFAULT_WAVELENGTH, pit
         reconstructions_list = []
         for index, distance in enumerate(distances):
             reconstruction_abs = fraunhofer_propergation(holograms, distance, pitch_size, wavelength).abs()
-            save_multi_frame_holograms_and_their_recons(holograms, reconstruction_abs, recon_dynamic_range=target_fields.detach().cpu().max(), alg_name='MultiFrame')
+            if save_progress:
+                save_multi_frame_holograms_and_their_recons(holograms, reconstruction_abs, recon_dynamic_range=target_fields.detach().cpu().max(), alg_name='MultiFrame')
             reconstruction_abs = reconstruction_abs.mean(dim=0)
             reconstruction_normalised = energy_conserve(reconstruction_abs, energy_conserv_scaling)
-            save_image(".\Output\MultiFrame\MultiFrame_mean_{}".format(index), reconstruction_normalised.detach().cpu(), target_fields.detach().cpu().max())
+            if save_progress:
+                save_image(".\Output\MultiFrame\MultiFrame_mean_{}".format(index), reconstruction_normalised.detach().cpu(), target_fields.detach().cpu().max())
             reconstructions_list.append(reconstruction_normalised)
         reconstructions = torch.stack(reconstructions_list)
 
@@ -530,7 +532,7 @@ def multi_frame_cgh(target_fields, distances, wavelength=DEFAULT_WAVELENGTH, pit
 
         loss.backward(retain_graph=True)
         # Record NMSE
-        if record_all_nmse:
+        if save_progress:
             for index, distance in enumerate(distances):
                 reconstruction_abs = fraunhofer_propergation(holograms, distance, pitch_size, wavelength).abs()
                 reconstruction_abs = reconstruction_abs.mean(dim=0)

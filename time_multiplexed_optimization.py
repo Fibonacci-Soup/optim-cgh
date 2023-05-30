@@ -14,7 +14,6 @@ import time
 import torch
 import torchvision
 import matplotlib.pyplot as plt
-import numpy as np
 import cgh_toolbox
 
 # Experimental setup - device properties
@@ -31,7 +30,7 @@ def main():
     # NUM_SLICES = 720 #858-258
     NUM_ITERATIONS = 100
     ENERGY_CONSERVATION_SCALING = 1.0
-    PLOT_EACH_SLICE = True
+    SAVE_PROGRESS = False
 
     target_fields_list = []
 
@@ -48,7 +47,7 @@ def main():
         # images = [r".\Target_images\sony_logo_1080x1080.jpg"]
         images = [r".\Target_images\mandrill2_gray_square.png"]
         for image_name in images:
-            target_field = torchvision.io.read_image(image_name, torchvision.io.ImageReadMode.GRAY).to(torch.float64)
+            target_field = torchvision.io.read_image(image_name, torchvision.io.ImageReadMode.GRAY).to(torch.float32)
             target_field = torch.nn.functional.interpolate(target_field.expand(1, -1, -1, -1), (1024, 1024))[0]
             # target_field = cgh_toolbox.zero_pad_to_size(target_field, target_height=1080, target_width=1920)
             target_field_normalised = cgh_toolbox.energy_conserve(target_field, ENERGY_CONSERVATION_SCALING)
@@ -90,9 +89,9 @@ def main():
         target_fields,
         distances,
         iteration_number=NUM_ITERATIONS,
-        cuda=False,
+        cuda=True,
         learning_rate=0.01,
-        record_all_nmse=True,
+        save_progress=SAVE_PROGRESS,
         optimise_algorithm="LBFGS",
         grad_history_size=8,
         num_frames=24,
@@ -103,7 +102,7 @@ def main():
     to_print = "L-BFGS with RE:\t time elapsed = {:.3f}s".format(time_elapsed)
     # Save results to file
     # cgh_toolbox.save_hologram_and_its_recons(hologram, distances, "LBFGS_RE")
-    if PLOT_EACH_SLICE:
+    if SAVE_PROGRESS:
         for index, nmse_list in enumerate(nmse_lists_LBFGS_RE):
             plt.plot(range(1, NUM_ITERATIONS + 1), nmse_list, '-', label="L-BFGS with RE (Slice {})".format(index + 1))
             to_print += "\tNMSE_{} = {:.15e}".format(index + 1, nmse_list[-1])
