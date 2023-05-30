@@ -30,9 +30,8 @@ def main():
 
     # NUM_SLICES = 720 #858-258
     NUM_ITERATIONS = 100
-    SEQUENTIAL_SLICING = False
     ENERGY_CONSERVATION_SCALING = 1.0
-    PLOT_EACH_SLICE = False
+    PLOT_EACH_SLICE = True
 
     target_fields_list = []
 
@@ -65,9 +64,8 @@ def main():
 
     target_fields = torch.stack(target_fields_list)
 
-    # for distance in np.arange(0.05, 1.01, 0.05):
     # Set distances for each target image
-    distances = [0.5]
+    distances = [999999]
     # distances = [.01, .02, .03, .04]
     # distances = [0.01 + i*SLM_PITCH_SIZE for i in range(0, NUM_SLICES, 10)]
     # distances = [0.09 + i*0.0001 for i in range(len(images))]
@@ -86,46 +84,18 @@ def main():
         cgh_toolbox.save_image(r'.\Output\Target_field_{}'.format(i), target_field)
 
 
-    # Carry out GD with MSE
-    time_start = time.time()
-    hologram, nmse_lists_GD_MSE, time_list_GD_MSE = cgh_toolbox.multi_frame_cgh(
-        target_fields,
-        distances,
-        sequential_slicing=SEQUENTIAL_SLICING,
-        iteration_number=NUM_ITERATIONS,
-        cuda=True,
-        learning_rate=0.01,
-        record_all_nmse=True,
-        optimise_algorithm="GD",
-        loss_function=torch.nn.MSELoss(reduction="sum")
-    )
-    time_elapsed = time.time() - time_start
-    to_print = "GD with MSE:\t time elapsed = {:.3f}s".format(time_elapsed)
-    # Save results to file
-    # cgh_toolbox.save_hologram_and_its_recons(hologram, distances, "GD_MSE")
-    if PLOT_EACH_SLICE:
-        for index, nmse_list in enumerate(nmse_lists_GD_MSE):
-            plt.plot(range(1, NUM_ITERATIONS + 1), nmse_list, '.--', label="GD with MSE (Slice {})".format(index + 1))
-            to_print += "\tNMSE_{} = {:.15e}".format(index + 1, nmse_list[-1])
-        plt.xlabel("iterarion(s)")
-        plt.ylabel("NMSE")
-        plt.legend()
-        plt.show()
-    print(to_print)
 
-
-    # Carry out LBFGS with RE
     time_start = time.time()
     hologram, nmse_lists_LBFGS_RE, time_list_LBFGS_RE = cgh_toolbox.multi_frame_cgh(
         target_fields,
         distances,
-        sequential_slicing=SEQUENTIAL_SLICING,
         iteration_number=NUM_ITERATIONS,
         cuda=True,
         learning_rate=0.01,
         record_all_nmse=True,
         optimise_algorithm="LBFGS",
         grad_history_size=8,
+        num_frames=8,
         loss_function=torch.nn.KLDivLoss(reduction="sum")
         # loss_function=torch.nn.MSELoss(reduction="sum")
     )
