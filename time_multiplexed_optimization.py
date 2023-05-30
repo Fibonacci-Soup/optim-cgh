@@ -46,10 +46,10 @@ def main():
         # images = [r".\Target_images\512_A.png", r".\Target_images\512_B.png", r".\Target_images\512_C.png", r".\Target_images\512_D.png", r".\Target_images\512_E.png", r".\Target_images\512_F.png", r".\Target_images\512_G.png"]
         # images = [r".\Target_images\Teapot_slices\Teapot_section_{}.png".format(858 - 1 - i) for i in range(0, NUM_SLICES, 20)]
         # images = [r".\Target_images\sony_logo_1080x1080.jpg"]
-        images = [r".\Target_images\mandrill.png"]
+        images = [r".\Target_images\mandrill2_gray_square.png"]
         for image_name in images:
             target_field = torchvision.io.read_image(image_name, torchvision.io.ImageReadMode.GRAY).to(torch.float64)
-            target_field = torch.nn.functional.interpolate(target_field.expand(1, -1, -1, -1), (1080, 1080))[0]
+            target_field = torch.nn.functional.interpolate(target_field.expand(1, -1, -1, -1), (1024, 1024))[0]
             # target_field = cgh_toolbox.zero_pad_to_size(target_field, target_height=1080, target_width=1920)
             target_field_normalised = cgh_toolbox.energy_conserve(target_field, ENERGY_CONSERVATION_SCALING)
             target_fields_list.append(target_field_normalised)
@@ -90,12 +90,12 @@ def main():
         target_fields,
         distances,
         iteration_number=NUM_ITERATIONS,
-        cuda=True,
+        cuda=False,
         learning_rate=0.01,
         record_all_nmse=True,
         optimise_algorithm="LBFGS",
         grad_history_size=8,
-        num_frames=8,
+        num_frames=24,
         loss_function=torch.nn.KLDivLoss(reduction="sum")
         # loss_function=torch.nn.MSELoss(reduction="sum")
     )

@@ -432,12 +432,26 @@ def lbfgs_cgh_3d(target_fields, distances, sequential_slicing=False, wavelength=
     hologram = amplitude * torch.exp(1j * phase)
     return hologram.detach().cpu(), nmse_lists, time_list
 
+def freeman_projector_encoding(holograms, alg_name='MultiFrame', filename_note=''):
+    binary_hologram = torch.round(holograms.detach().cpu().angle() / math.pi)
+    freeman_hologram = torch.zeros(3, holograms.size(-2), holograms.size(-1))
+    for channel_i in range(3):
+        channel_temp_sum = torch.zeros(1, holograms.size(-2), holograms.size(-1))
+        for subframe_i in range(8):
+            current_frame_i = (channel_i * 8 + subframe_i) % holograms.size(0)
+            channel_temp_sum += binary_hologram[current_frame_i] * 2**subframe_i
+        freeman_hologram[channel_i] = channel_temp_sum.detach()
+
+    save_image('.\Output\{0}\{0}_freeman_holo{1}'.format(alg_name, filename_note), freeman_hologram)
+    return
 
 def save_multi_frame_holograms_and_their_recons(holograms, reconstructions=None, recon_dynamic_range=None, alg_name='MultiFrame', filename_note=''):
     if not os.path.isdir('Output\{}'.format(alg_name)):
                 os.makedirs('Output\{}'.format(alg_name))
+    freeman_projector_encoding(holograms)
 
     if reconstructions is None:
+        print("Reconstructions not given, re-doing computations from holograms")
         for hologram_i, hologram in enumerate(holograms):
             # print("phase mean: ", hologram.angle().mean().item(), "max: ", hologram.angle().max().item(), "min: ", hologram.angle().min().item())
             phase_hologram = hologram.detach().cpu().angle() % (2*math.pi) / (2*math.pi) * 255.0
@@ -453,13 +467,12 @@ def save_multi_frame_holograms_and_their_recons(holograms, reconstructions=None,
 
     else:
         for hologram_i, hologram in enumerate(holograms):
-            phase_hologram = hologram.detach().cpu().angle() % (2*math.pi) / (2*math.pi) * 255.0
+            phase_hologram = hologram.detach().cpu().angle() % (math.pi) / (math.pi) * 255.0
             save_image('.\Output\{0}\{0}_holo{1}{2}'.format(alg_name, hologram_i, filename_note), phase_hologram, 255.0)
 
         for reconstruction_i, reconstruction in enumerate(reconstructions):
             reconstruction_normalised = energy_conserve(reconstruction)
             save_image('.\Output\{0}\{0}_recon{1}{2}'.format(alg_name, reconstruction_i, filename_note), reconstruction_normalised.detach().cpu(), recon_dynamic_range)
-
 
 
 def multi_frame_cgh(target_fields, distances, wavelength=DEFAULT_WAVELENGTH, pitch_size=DEFAULT_PITCH_SIZE,
@@ -496,7 +509,8 @@ def multi_frame_cgh(target_fields, distances, wavelength=DEFAULT_WAVELENGTH, pit
 
     for i in range(iteration_number):
         optimiser.zero_grad()
-        holograms = amplitude * torch.exp(1j * phases)
+        quantized_phases = torch.nn.Sigmoid()(phases / math.pi) * math.pi
+        holograms = amplitude * torch.exp(1j * quantized_phases)
 
 
         # Propagate hologram for all distances
@@ -506,7 +520,7 @@ def multi_frame_cgh(target_fields, distances, wavelength=DEFAULT_WAVELENGTH, pit
             save_multi_frame_holograms_and_their_recons(holograms, reconstruction_abs, recon_dynamic_range=target_fields.detach().cpu().max(), alg_name='MultiFrame')
             reconstruction_abs = reconstruction_abs.mean(dim=0)
             reconstruction_normalised = energy_conserve(reconstruction_abs, energy_conserv_scaling)
-            save_image(".\Output\MultiFrame\MultiFrame_mean_{}".format(index), reconstruction_abs.detach().cpu(), target_fields.detach().cpu().max())
+            save_image(".\Output\MultiFrame\MultiFrame_mean_{}".format(index), reconstruction_normalised.detach().cpu(), target_fields.detach().cpu().max())
             reconstructions_list.append(reconstruction_normalised)
         reconstructions = torch.stack(reconstructions_list)
 
@@ -521,10 +535,8 @@ def multi_frame_cgh(target_fields, distances, wavelength=DEFAULT_WAVELENGTH, pit
                 reconstruction_abs = fraunhofer_propergation(holograms, distance, pitch_size, wavelength).abs()
                 reconstruction_abs = reconstruction_abs.mean(dim=0)
                 reconstruction_normalised = energy_conserve(reconstruction_abs, energy_conserv_scaling)
-                # reconstruction_normalised = energy_match(reconstruction_abs, target_fields[slice_number])
                 nmse_value = (torch.nn.MSELoss(reduction="mean")(reconstruction_normalised, target_fields[index])).item() / (target_fields[index]**2).sum()
                 nmse_lists[index].append(nmse_value.data.tolist())
-            # save_multi_frame_holograms_and_their_recons(holograms, recon_dynamic_range=target_fields.detach().cpu().max(), alg_name='MultiFrame')
 
         time_list.append(time.time() - time_start)
         if time_limit:
