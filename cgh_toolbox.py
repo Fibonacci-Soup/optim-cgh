@@ -243,14 +243,18 @@ def energy_match(field, target_field):
     return field * torch.sqrt((target_field**2).sum() / (field**2).sum())
 
 
-def gerchberg_saxton_fraunhofer(target_field, iteration_number=50):
-    torch.manual_seed(0)
-    A = torch.exp(1j * ((torch.rand(target_field.size()) * 2 - 1) * math.pi).to(torch.float64))
+def gerchberg_saxton_fraunhofer(target_field, iteration_number=50, manual_seed_value=0):
+    torch.manual_seed(manual_seed_value)
+    device = torch.device("cuda")
+    target_field = target_field.to(device)
+
+    A = torch.exp(1j * ((torch.rand(target_field.size()) * 2 - 1) * math.pi).to(torch.float64)).to(device)
     GS_NMSE_list = []
     for i in range(iteration_number):
         E = torch.fft.fftshift(torch.fft.fft2(torch.fft.fftshift(A)))
-        E_norm = energy_conserve(E.abs())
-        GS_NMSE_list.append((torch.nn.MSELoss(reduction="mean")(E_norm, target_field)).item() / (target_field**2).sum())
+        E_norm = energy_match(E.abs(), target_field)
+        # save_image(".\\Output\\recon", E_norm.detach().cpu())
+        GS_NMSE_list.append((torch.nn.MSELoss(reduction="mean")(E_norm, target_field)).item() / (target_field**2).sum().item())
         E = target_field * torch.exp(1j * E.angle())
         A = torch.fft.ifftshift(torch.fft.ifft2(torch.fft.ifftshift(E)))
         A = torch.exp(1j * A.angle())
@@ -517,11 +521,11 @@ def multi_frame_cgh(target_fields, distances, wavelength=DEFAULT_WAVELENGTH, pit
         reconstructions_list = []
         for index, distance in enumerate(distances):
             reconstruction_abs = fraunhofer_propergation(holograms, distance, pitch_size, wavelength).abs()
-            if save_progress:
+            if save_progress or (i == iteration_number - 1):
                 save_multi_frame_holograms_and_their_recons(holograms, reconstruction_abs, recon_dynamic_range=target_fields.detach().cpu().max(), alg_name='MultiFrame')
             reconstruction_abs = reconstruction_abs.mean(dim=0)
             reconstruction_normalised = energy_conserve(reconstruction_abs, energy_conserv_scaling)
-            if save_progress:
+            if save_progress or (i == iteration_number - 1):
                 save_image(".\Output\MultiFrame\MultiFrame_mean_{}".format(index), reconstruction_normalised.detach().cpu(), target_fields.detach().cpu().max())
             reconstructions_list.append(reconstruction_normalised)
         reconstructions = torch.stack(reconstructions_list)
@@ -532,7 +536,7 @@ def multi_frame_cgh(target_fields, distances, wavelength=DEFAULT_WAVELENGTH, pit
 
         loss.backward(retain_graph=True)
         # Record NMSE
-        if save_progress:
+        if save_progress or (i == iteration_number - 1):
             for index, distance in enumerate(distances):
                 reconstruction_abs = fraunhofer_propergation(holograms, distance, pitch_size, wavelength).abs()
                 reconstruction_abs = reconstruction_abs.mean(dim=0)
