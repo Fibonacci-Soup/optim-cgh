@@ -14,10 +14,27 @@ import torch
 import torchvision
 import scipy.interpolate
 import numpy as np
+import pytorch_msssim
 
 DEFAULT_PITCH_SIZE = 0.00000425  # 0000136
 DEFAULT_WAVELENGTH = 0.0000006607
 
+
+def generate_checkerboard_image(vertical_size=512, horizontal_size=512, size=2):
+    checkerboard_array = np.zeros((vertical_size, horizontal_size))
+    for v_i in range(0, vertical_size):
+        for h_i in range(0, horizontal_size):
+            if v_i % size == 0:
+                if h_i % size == 0:
+                    checkerboard_array[v_i][h_i] = 255
+                else:
+                    checkerboard_array[v_i][h_i] = 0
+            else:
+                if h_i % size == 0:
+                    checkerboard_array[v_i][h_i] = 0
+                else:
+                    checkerboard_array[v_i][h_i] = 255
+    return np.array([checkerboard_array])
 
 def generate_grid_image(vertical_size=512, horizontal_size=512, vertical_spacing=2, horizontal_spacing=2):
     grid_array = np.zeros((vertical_size, horizontal_size))
@@ -243,7 +260,7 @@ def energy_match(field, target_field):
     return field * torch.sqrt((target_field**2).sum() / (field**2).sum())
 
 
-def gerchberg_saxton_fraunhofer(target_field, iteration_number=50, manual_seed_value=0):
+def gerchberg_saxton_fraunhofer(target_field, iteration_number=50, manual_seed_value=0, hologram_quantization_bit_depth=None):
     torch.manual_seed(manual_seed_value)
     device = torch.device("cuda")
     target_field = target_field.to(device)
@@ -254,10 +271,20 @@ def gerchberg_saxton_fraunhofer(target_field, iteration_number=50, manual_seed_v
         E = torch.fft.fftshift(torch.fft.fft2(torch.fft.fftshift(A)))
         E_norm = energy_match(E.abs(), target_field)
         # save_image(".\\Output\\recon", E_norm.detach().cpu())
-        GS_NMSE_list.append((torch.nn.MSELoss(reduction="mean")(E_norm, target_field)).item() / (target_field**2).sum().item())
+        # GS_NMSE_list.append((torch.nn.MSELoss(reduction="mean")(E_norm, target_field)).item() / (target_field**2).sum().item())
+        # GS_NMSE_list.append(torch.nn.KLDivLoss(reduction="mean")(torch.flatten(E_norm / target_field.max()).expand(1, -1), torch.flatten(target_field / target_field.max()).expand(1, -1)).item())
+        nmse_i = (((E_norm - target_field)**2).mean() / (target_field**2).sum()).item()
+        # nmse_i = pytorch_msssim.ssim(E_norm.expand(1, -1, -1, -1), target_field.expand(1, -1, -1, -1)).item()
+
+        GS_NMSE_list.append(nmse_i)
         E = target_field * torch.exp(1j * E.angle())
         A = torch.fft.ifftshift(torch.fft.ifft2(torch.fft.ifftshift(E)))
-        A = torch.exp(1j * A.angle())
+        phase_hologram = A.angle()
+        if hologram_quantization_bit_depth:
+            phase_hologram = torch.round(phase_hologram / math.pi * 2**(hologram_quantization_bit_depth-1)) / 2**(hologram_quantization_bit_depth-1) * math.pi
+        A = torch.exp(1j * phase_hologram)
+    # save_image('.\\Output\\recon_bit_depth_{}'.format(hologram_quantization_bit_depth), E_norm.detach().cpu(), target_field.max().cpu())
+    # save_image('.\\Output\\hologram_bit_depth_{}'.format(hologram_quantization_bit_depth), phase_hologram.detach().cpu(), math.pi)
     return A, GS_NMSE_list
 
 
@@ -361,7 +388,8 @@ def lbfgs_cgh_3d(target_fields, distances, sequential_slicing=False, wavelength=
         phase = (torch.ones(target_fields[0].size()) * generate_linear_phase([target_fields[0].shape[-2], target_fields[0].shape[-1]], 0.5)).to(torch.float64).detach().to(device).requires_grad_()
     elif initial_phase.lower() in ['quadratic', 'quad']:
         # linear initial phase
-        phase = (torch.ones(target_fields[0].size()) * generate_quadradic_phase([target_fields[0].shape[-2], target_fields[0].shape[-1]], 0.00002)).to(torch.float64).detach().to(device).requires_grad_()
+        phase = (torch.ones(target_fields[0].size()) * generate_quadradic_phase([target_fields[0].shape[-2],
+                 target_fields[0].shape[-1]], 0.00002)).to(torch.float64).detach().to(device).requires_grad_()
     else:
         raise Exception("The required initial phase is not recognised!")
 
@@ -436,6 +464,7 @@ def lbfgs_cgh_3d(target_fields, distances, sequential_slicing=False, wavelength=
     hologram = amplitude * torch.exp(1j * phase)
     return hologram.detach().cpu(), nmse_lists, time_list
 
+
 def freeman_projector_encoding(holograms, alg_name='MultiFrame', filename_note=''):
     binary_hologram = torch.round(holograms.detach().cpu().angle() / math.pi)
     freeman_hologram = torch.zeros(3, holograms.size(-2), holograms.size(-1))
@@ -449,9 +478,10 @@ def freeman_projector_encoding(holograms, alg_name='MultiFrame', filename_note='
     save_image('.\Output\{0}\{0}_freeman_holo{1}'.format(alg_name, filename_note), freeman_hologram)
     return
 
+
 def save_multi_frame_holograms_and_their_recons(holograms, reconstructions=None, recon_dynamic_range=None, alg_name='MultiFrame', filename_note=''):
     if not os.path.isdir('Output\{}'.format(alg_name)):
-                os.makedirs('Output\{}'.format(alg_name))
+        os.makedirs('Output\{}'.format(alg_name))
     freeman_projector_encoding(holograms)
 
     if reconstructions is None:
@@ -480,9 +510,9 @@ def save_multi_frame_holograms_and_their_recons(holograms, reconstructions=None,
 
 
 def multi_frame_cgh(target_fields, distances, wavelength=DEFAULT_WAVELENGTH, pitch_size=DEFAULT_PITCH_SIZE,
-                 iteration_number=20, cuda=False, learning_rate=0.1, save_progress=True, optimise_algorithm="LBFGS",
-                 grad_history_size=10, loss_function=torch.nn.MSELoss(reduction="sum"), energy_conserv_scaling=1.0, time_limit=None,
-                 num_frames=8):
+                    iteration_number=20, cuda=False, learning_rate=0.1, save_progress=True, optimise_algorithm="LBFGS",
+                    grad_history_size=10, loss_function=torch.nn.MSELoss(reduction="sum"), energy_conserv_scaling=1.0, time_limit=None,
+                    num_frames=8):
 
     time_start = time.time()
     torch.cuda.empty_cache()
@@ -508,41 +538,39 @@ def multi_frame_cgh(target_fields, distances, wavelength=DEFAULT_WAVELENGTH, pit
 
     time_list = []
     nmse_lists = []
-    for distance in distances:
-        nmse_lists.append([])
+    nmse_lists.append([])
 
     for i in range(iteration_number):
+        print(i)
         optimiser.zero_grad()
-        quantized_phases = torch.nn.Sigmoid()(phases / math.pi) * math.pi
-        holograms = amplitude * torch.exp(1j * quantized_phases)
-
+        if i > 0.5 * iteration_number:
+            quantized_phases = torch.nn.Sigmoid()(phases / math.pi) * math.pi
+            holograms = amplitude * torch.exp(1j * quantized_phases)
+        else:
+            holograms = amplitude * torch.exp(1j * phases)
 
         # Propagate hologram for all distances
-        reconstructions_list = []
-        for index, distance in enumerate(distances):
-            reconstruction_abs = fraunhofer_propergation(holograms, distance, pitch_size, wavelength).abs()
-            if save_progress or (i == iteration_number - 1):
-                save_multi_frame_holograms_and_their_recons(holograms, reconstruction_abs, recon_dynamic_range=target_fields.detach().cpu().max(), alg_name='MultiFrame')
-            reconstruction_abs = reconstruction_abs.mean(dim=0)
-            reconstruction_normalised = energy_conserve(reconstruction_abs, energy_conserv_scaling)
-            if save_progress or (i == iteration_number - 1):
-                save_image(".\Output\MultiFrame\MultiFrame_mean_{}".format(index), reconstruction_normalised.detach().cpu(), target_fields.detach().cpu().max())
-            reconstructions_list.append(reconstruction_normalised)
-        reconstructions = torch.stack(reconstructions_list)
+
+        reconstructions = fraunhofer_propergation(holograms).abs()
+        if save_progress or (i == iteration_number - 1):
+            save_multi_frame_holograms_and_their_recons(holograms, reconstructions, recon_dynamic_range=target_fields.detach().cpu().max(), alg_name='MultiFrame')
+        reconstructions = reconstructions.mean(dim=0)
+        reconstructions = energy_conserve(reconstructions, energy_conserv_scaling)
+        if save_progress or (i == iteration_number - 1):
+            save_image(".\Output\MultiFrame\MultiFrame_mean", reconstructions.detach().cpu(), target_fields.detach().cpu().max())
 
         # Calculate loss for all slices (stacked in reconstructions)
         loss = loss_function(torch.flatten(reconstructions / target_fields.max()).expand(1, -1),
-                                torch.flatten(target_fields / target_fields.max()).expand(1, -1))
+                             torch.flatten(target_fields / target_fields.max()).expand(1, -1))
 
         loss.backward(retain_graph=True)
         # Record NMSE
         if save_progress or (i == iteration_number - 1):
-            for index, distance in enumerate(distances):
-                reconstruction_abs = fraunhofer_propergation(holograms, distance, pitch_size, wavelength).abs()
-                reconstruction_abs = reconstruction_abs.mean(dim=0)
-                reconstruction_normalised = energy_conserve(reconstruction_abs, energy_conserv_scaling)
-                nmse_value = (torch.nn.MSELoss(reduction="mean")(reconstruction_normalised, target_fields[index])).item() / (target_fields[index]**2).sum()
-                nmse_lists[index].append(nmse_value.data.tolist())
+            reconstructions = fraunhofer_propergation(holograms).abs()
+            reconstructions = reconstructions.mean(dim=0)
+            reconstructions = energy_conserve(reconstructions, energy_conserv_scaling)
+            nmse_value = (torch.nn.MSELoss(reduction="mean")(reconstructions, target_fields[0])).item() / (target_fields[0]**2).sum()
+            nmse_lists[0].append(nmse_value.data.tolist())
 
         time_list.append(time.time() - time_start)
         if time_limit:
