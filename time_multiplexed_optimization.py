@@ -26,7 +26,7 @@ def main():
     WAVELENGTH = 0.0000006607
 
     # NUM_SLICES = 720 #858-258
-    NUM_ITERATIONS = 100
+    NUM_ITERATIONS = 1000
     ENERGY_CONSERVATION_SCALING = 1.0
     SAVE_PROGRESS = False
 
@@ -89,7 +89,7 @@ def main():
         target_fields,
         distances,
         iteration_number=NUM_ITERATIONS,
-        cuda=True,
+        cuda=False,
         learning_rate=0.01,
         save_progress=SAVE_PROGRESS,
         optimise_algorithm="LBFGS",

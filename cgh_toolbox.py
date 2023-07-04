@@ -14,7 +14,7 @@ import torch
 import torchvision
 import scipy.interpolate
 import numpy as np
-import pytorch_msssim
+# import pytorch_msssim
 
 DEFAULT_PITCH_SIZE = 0.00000425  # 0000136
 DEFAULT_WAVELENGTH = 0.0000006607
@@ -543,7 +543,7 @@ def multi_frame_cgh(target_fields, distances, wavelength=DEFAULT_WAVELENGTH, pit
     for i in range(iteration_number):
         print(i)
         optimiser.zero_grad()
-        if i > 5:
+        if i > iteration_number / 4:
             holograms = amplitude * torch.exp(1j * torch.nn.Sigmoid()(phases / math.pi) * math.pi)
         else:
             holograms = amplitude * torch.exp(1j * phases)
