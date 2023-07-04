@@ -475,13 +475,13 @@ def freeman_projector_encoding(holograms, alg_name='MultiFrame', filename_note='
             channel_temp_sum += binary_hologram[current_frame_i] * 2**subframe_i
         freeman_hologram[channel_i] = channel_temp_sum.detach()
 
-    save_image('.\Output\{0}\{0}_freeman_holo{1}'.format(alg_name, filename_note), freeman_hologram)
+    save_image(os.path.join('Output', alg_name, '{}_freeman_holo{}'.format(alg_name, filename_note)), freeman_hologram)
     return
 
 
 def save_multi_frame_holograms_and_their_recons(holograms, reconstructions=None, recon_dynamic_range=None, alg_name='MultiFrame', filename_note=''):
-    if not os.path.isdir('Output\{}'.format(alg_name)):
-        os.makedirs('Output\{}'.format(alg_name))
+    if not os.path.isdir(os.path.join('Output','{}'.format(alg_name))):
+        os.makedirs(os.path.join('Output','{}'.format(alg_name)))
     freeman_projector_encoding(holograms)
 
     if reconstructions is None:
@@ -490,23 +490,24 @@ def save_multi_frame_holograms_and_their_recons(holograms, reconstructions=None,
             # print("phase mean: ", hologram.angle().mean().item(), "max: ", hologram.angle().max().item(), "min: ", hologram.angle().min().item())
             phase_hologram = hologram.detach().cpu().angle() % (2*math.pi) / (2*math.pi) * 255.0
             # print("encoded holo mean: ", phase_hologram.mean().item(), "max: ", phase_hologram.max().item(), "min: ", phase_hologram.min().item())
-            save_image('.\Output\{0}\{0}_holo{1}{2}'.format(alg_name, hologram_i, filename_note), phase_hologram, 255.0)
+            save_image(os.path.join('Output', alg_name, '{}_holo{}{}'.format(alg_name, hologram_i, filename_note)), phase_hologram, 255.0)
 
             # gamma_corrected_phase_hologram = hologram_encoding_gamma_correct_linear(phase_hologram)
             # print("Sony holo mean: ", gamma_corrected_phase_hologram.mean().item(), "max: ", gamma_corrected_phase_hologram.max().item(), "min: ", gamma_corrected_phase_hologram.min().item())
             # save_image('.\Output\{0}\{0}_sony_holo{1}'.format(alg_name, filename_note), gamma_corrected_phase_hologram, 255.0)
             reconstruction_abs = fraunhofer_propergation(hologram).abs()
             reconstruction_normalised = energy_conserve(reconstruction_abs)
-            save_image('.\Output\{0}\{0}_recon{1}{2}'.format(alg_name, hologram_i, filename_note), reconstruction_normalised.detach().cpu(), recon_dynamic_range)
+            save_image(os.path.join('Output', alg_name, '{}_recon{}{}'.format(alg_name, hologram_i, filename_note)), reconstruction_normalised.detach().cpu(), recon_dynamic_range)
+
 
     else:
         for hologram_i, hologram in enumerate(holograms):
             phase_hologram = hologram.detach().cpu().angle() % (math.pi) / (math.pi) * 255.0
-            save_image('.\Output\{0}\{0}_holo{1}{2}'.format(alg_name, hologram_i, filename_note), phase_hologram, 255.0)
+            save_image(os.path.join('Output', alg_name, '{}_holo{}{}'.format(alg_name, hologram_i, filename_note)), phase_hologram, 255.0)
 
         for reconstruction_i, reconstruction in enumerate(reconstructions):
             reconstruction_normalised = energy_conserve(reconstruction)
-            save_image('.\Output\{0}\{0}_recon{1}{2}'.format(alg_name, reconstruction_i, filename_note), reconstruction_normalised.detach().cpu(), recon_dynamic_range)
+            save_image(os.path.join('Output', alg_name, '{}_recon{}{}'.format(alg_name, hologram_i, filename_note)), reconstruction_normalised.detach().cpu(), recon_dynamic_range)
 
 
 def multi_frame_cgh(target_fields, distances, wavelength=DEFAULT_WAVELENGTH, pitch_size=DEFAULT_PITCH_SIZE,
@@ -556,7 +557,7 @@ def multi_frame_cgh(target_fields, distances, wavelength=DEFAULT_WAVELENGTH, pit
         reconstructions = reconstructions.mean(dim=0)
         reconstructions = energy_conserve(reconstructions, energy_conserv_scaling)
         if save_progress or (i == iteration_number - 1):
-            save_image(".\Output\MultiFrame\MultiFrame_mean", reconstructions.detach().cpu(), target_fields.detach().cpu().max())
+            save_image(os.path.join('Output','MultiFrame', 'MultiFrame_mean'), reconstructions.detach().cpu(), target_fields.detach().cpu().max())
 
         # Calculate loss for all slices (stacked in reconstructions)
         loss = loss_function(torch.flatten(reconstructions / target_fields.max()).expand(1, -1),

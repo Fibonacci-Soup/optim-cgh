@@ -44,7 +44,8 @@ def main():
     # images = [r".\Target_images\sony_logo_1080x1080.jpg"]
     # images = [r".\Target_images\mandrill.png"]
     # images = [r".\Target_images\mandrill2_square.png"]
-    images = [r".\Target_images\holography_ambigram_smaller.png"]
+    # images = [r".\Target_images\holography_ambigram_smaller.png"]
+    images = [os.path.join('Target_images','holography_ambigram_smaller.png' )]
     for image_name in images:
         target_field = torchvision.io.read_image(image_name, torchvision.io.ImageReadMode.GRAY).to(torch.float32)
         target_field = torch.nn.functional.interpolate(target_field.expand(1, -1, -1, -1), (1536, 2048))[0]
@@ -80,7 +81,7 @@ def main():
     if not os.path.isdir('Output'):
         os.makedirs('Output')
     for i, target_field in enumerate(target_fields):
-        cgh_toolbox.save_image(r'.\Output\Target_field_{}'.format(i), target_field)
+        cgh_toolbox.save_image(os.path.join('Output','Target_field_{}'.format(i)), target_field)
 
 
 
