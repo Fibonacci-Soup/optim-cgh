@@ -543,9 +543,8 @@ def multi_frame_cgh(target_fields, distances, wavelength=DEFAULT_WAVELENGTH, pit
     for i in range(iteration_number):
         print(i)
         optimiser.zero_grad()
-        if i > 0.5 * iteration_number:
-            quantized_phases = torch.nn.Sigmoid()(phases / math.pi) * math.pi
-            holograms = amplitude * torch.exp(1j * quantized_phases)
+        if i > 5:
+            holograms = amplitude * torch.exp(1j * torch.nn.Sigmoid()(phases / math.pi) * math.pi)
         else:
             holograms = amplitude * torch.exp(1j * phases)
 

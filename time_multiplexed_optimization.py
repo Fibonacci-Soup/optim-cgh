@@ -26,7 +26,7 @@ def main():
     WAVELENGTH = 0.0000006607
 
     # NUM_SLICES = 720 #858-258
-    NUM_ITERATIONS = 1000
+    NUM_ITERATIONS = 100
     ENERGY_CONSERVATION_SCALING = 1.0
     SAVE_PROGRESS = False
 
@@ -44,7 +44,7 @@ def main():
     # images = [r".\Target_images\sony_logo_1080x1080.jpg"]
     # images = [r".\Target_images\mandrill.png"]
     # images = [r".\Target_images\mandrill2_square.png"]
-    images = [r".\Target_images\holography_ambigram.png"]
+    images = [r".\Target_images\holography_ambigram_smaller.png"]
     for image_name in images:
         target_field = torchvision.io.read_image(image_name, torchvision.io.ImageReadMode.GRAY).to(torch.float32)
         target_field = torch.nn.functional.interpolate(target_field.expand(1, -1, -1, -1), (1536, 2048))[0]
