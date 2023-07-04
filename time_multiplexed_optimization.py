@@ -90,7 +90,7 @@ def main():
         target_fields,
         distances,
         iteration_number=NUM_ITERATIONS,
-        cuda=False,
+        cuda=True,
         learning_rate=0.01,
         save_progress=SAVE_PROGRESS,
         optimise_algorithm="LBFGS",
