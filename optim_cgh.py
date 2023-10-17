@@ -18,59 +18,36 @@ import numpy as np
 import cgh_toolbox
 
 # Experimental setup - device properties
+# SLM and laser info
+PITCH_SIZE = 0.00000425  # 0.0000136
+WAVELENGTH = 0.0000006607
 
 
 def main():
-    """
-    Main function of lbfgs_cgh_3d
-    """
-    # SLM and laser info
-    PITCH_SIZE = 0.00000425
-    WAVELENGTH = 0.0000006607
-
-    # NUM_SLICES = 720 #858-258
     NUM_ITERATIONS = 100
-    SEQUENTIAL_SLICING = True
+    SEQUENTIAL_SLICING = False
     ENERGY_CONSERVATION_SCALING = 1.0
     PLOT_EACH_SLICE = False
 
+    # Load target images
+    images = [os.path.join('Target_images', x) for x in ['A.png', 'B.png', 'C.png', 'D.png']]
     target_fields_list = []
-
-    READ_TARGET_FIELD_FROM_FILE = True
-    if READ_TARGET_FIELD_FROM_FILE:
-        # Load target images
-        # images = [r".\Target_images\A.png", r".\Target_images\B.png", r".\Target_images\C.png", r".\Target_images\D.png"]
-        # images = [r".\Target_images\grey-scale-test.png", r".\Target_images\szzx1.png", r".\Target_images\guang.png", r".\Target_images\mandrill1.png"]
-        # images = [r".\Target_images\512_A.png", r".\Target_images\512_B.png", r".\Target_images\512_C.png", r".\Target_images\512_D.png"]
-        # images = [r".\Target_images\1080p_A.png", r".\Target_images\1080p_B.png", r".\Target_images\1080p_C.png", r".\Target_images\1080p_D.png"]
-        # images = [r".\Target_images\mandrill.png", r".\Target_images\512_B.png", r".\Target_images\512_szzx.png", r".\Target_images\512_D.png"]
-        # images = [r".\Target_images\512_A.png", r".\Target_images\512_B.png", r".\Target_images\512_C.png", r".\Target_images\512_D.png", r".\Target_images\512_E.png", r".\Target_images\512_F.png", r".\Target_images\512_G.png"]
-        # images = [r".\Target_images\Teapot_slices\Teapot_section_{}.png".format(858 - 1 - i) for i in range(0, NUM_SLICES, 20)]
-        images = [r".\Target_images\sony_logo_1080x1080.jpg"]
-        for image_name in images:
-            target_field = torchvision.io.read_image(image_name, torchvision.io.ImageReadMode.GRAY).to(torch.float64)
-            target_field = torch.nn.functional.interpolate(target_field.expand(1, -1, -1, -1), (1080, 1920))[0]
-            # target_field = cgh_toolbox.zero_pad_to_size(target_field, target_height=1080, target_width=1920)
-            target_field_normalised = cgh_toolbox.energy_conserve(target_field, ENERGY_CONSERVATION_SCALING)
-            target_fields_list.append(target_field_normalised)
-    else:
-        # Generate target field
-        target_field = torch.from_numpy(cgh_toolbox.generate_grid_image(vertical_size=1080, horizontal_size=1920, vertical_spacing=20, horizontal_spacing=20))
-        # target_field = torch.nn.functional.interpolate(target_field.expand(1, -1, -1, -1), (1080, 1920))[0]
-        # target_field = cgh_toolbox.zero_pad_to_size(target_field, target_height=1920, target_width=1920)
-
+    for image_name in images:
+        target_field = torchvision.io.read_image(image_name, torchvision.io.ImageReadMode.GRAY).to(torch.float64)
+        # target_field = torch.nn.functional.interpolate(target_field.expand(1, -1, -1, -1), (512, 1024))[0]
+        # target_field = cgh_toolbox.zero_pad_to_size(target_field, target_height=1080, target_width=1920)
         target_field_normalised = cgh_toolbox.energy_conserve(target_field, ENERGY_CONSERVATION_SCALING)
         target_fields_list.append(target_field_normalised)
+    # Or generate target fields for specific patterns
+    # target_field = torch.from_numpy(cgh_toolbox.generate_grid_image(vertical_size=1080, horizontal_size=1920, vertical_spacing=20, horizontal_spacing=20))
+    # target_field_normalised = cgh_toolbox.energy_conserve(target_field, ENERGY_CONSERVATION_SCALING)
+    # target_fields_list.append(target_field_normalised)
 
     target_fields = torch.stack(target_fields_list)
 
-    # for distance in np.arange(0.05, 1.01, 0.05):
     # Set distances for each target image
-    distances = [0.5]
-    # distances = [.01, .02, .03, .04]
-    # distances = [0.01 + i*SLM_PITCH_SIZE for i in range(0, NUM_SLICES, 10)]
+    distances = [.01, .02, .03, .04]
     # distances = [0.09 + i*0.0001 for i in range(len(images))]
-    # distances = [0.07, 0.10, 0.15, 0.25]
 
     # Check for mismatch between numbers of distances and images given
     if len(distances) != len(target_fields):
@@ -84,20 +61,12 @@ def main():
     for i, target_field in enumerate(target_fields):
         cgh_toolbox.save_image(r'.\Output\Target_field_{}'.format(i), target_field)
 
-
-    # hologram, nmse_lists_GS = cgh_toolbox.gerchberg_saxton_fraunhofer(target_fields[0])
-    # cgh_toolbox.save_hologram_and_its_recons(hologram, [9999999], "GS")
-    # hologram, nmse_lists_GS = cgh_toolbox.gerchberg_saxton_fraunhofer_smooth(target_fields[0])
-    # cgh_toolbox.save_hologram_and_its_recons(hologram, [9999999], "GS_smooth")
-
-
     # Carry out GS with SS
     time_start = time.time()
     hologram, nmse_lists_GS, time_list_GS = cgh_toolbox.gerchberg_saxton_3d_sequential_slicing(
         target_fields, distances, iteration_number=NUM_ITERATIONS, weighting=0, pitch_size=PITCH_SIZE, wavelength=WAVELENGTH)
     time_elapsed = time.time() - time_start
     to_print = "GS reference:\t time elapsed = {:.3f}s".format(time_elapsed)
-    # Save results to file
     cgh_toolbox.save_hologram_and_its_recons(hologram, distances, "GS")
     if PLOT_EACH_SLICE:
         for index, nmse_list in enumerate(nmse_lists_GS):
@@ -109,15 +78,12 @@ def main():
         plt.show()
     print(to_print)
 
-
-
     # Carry out DCGS
     time_start = time.time()
     hologram, nmse_lists_DCGS, time_list_DCGS = cgh_toolbox.gerchberg_saxton_3d_sequential_slicing(
         target_fields, distances, iteration_number=NUM_ITERATIONS, weighting=0.001, pitch_size=PITCH_SIZE, wavelength=WAVELENGTH)
     time_elapsed = time.time() - time_start
     to_print = "DCGS reference:\t time elapsed = {:.3f}s".format(time_elapsed)
-    # Save results to file
     cgh_toolbox.save_hologram_and_its_recons(hologram, distances, "DCGS")
     if PLOT_EACH_SLICE:
         for index, nmse_list in enumerate(nmse_lists_DCGS):
@@ -129,11 +95,9 @@ def main():
         plt.show()
     print(to_print)
 
-
-
     # Carry out GD with MSE
     time_start = time.time()
-    hologram, nmse_lists_GD_MSE, time_list_GD_MSE = cgh_toolbox.lbfgs_cgh_3d(
+    hologram, nmse_lists_GD_MSE, time_list_GD_MSE = cgh_toolbox.optim_cgh_3d(
         target_fields,
         distances,
         sequential_slicing=SEQUENTIAL_SLICING,
@@ -147,7 +111,6 @@ def main():
     )
     time_elapsed = time.time() - time_start
     to_print = "GD with MSE:\t time elapsed = {:.3f}s".format(time_elapsed)
-    # Save results to file
     cgh_toolbox.save_hologram_and_its_recons(hologram, distances, "GD_MSE")
     if PLOT_EACH_SLICE:
         for index, nmse_list in enumerate(nmse_lists_GD_MSE):
@@ -161,7 +124,7 @@ def main():
 
     # Carry out LBFGS with RE
     time_start = time.time()
-    hologram, nmse_lists_LBFGS_RE, time_list_LBFGS_RE = cgh_toolbox.lbfgs_cgh_3d(
+    hologram, nmse_lists_LBFGS_RE, time_list_LBFGS_RE = cgh_toolbox.optim_cgh_3d(
         target_fields,
         distances,
         sequential_slicing=SEQUENTIAL_SLICING,
@@ -173,11 +136,9 @@ def main():
         optimise_algorithm="LBFGS",
         grad_history_size=8,
         loss_function=torch.nn.KLDivLoss(reduction="sum")
-        # loss_function=torch.nn.MSELoss(reduction="sum")
     )
     time_elapsed = time.time() - time_start
     to_print = "L-BFGS with RE:\t time elapsed = {:.3f}s".format(time_elapsed)
-    # Save results to file
     cgh_toolbox.save_hologram_and_its_recons(hologram, distances, "LBFGS_RE")
     if PLOT_EACH_SLICE:
         for index, nmse_list in enumerate(nmse_lists_LBFGS_RE):
@@ -188,8 +149,6 @@ def main():
         plt.legend()
         plt.show()
     print(to_print)
-
-
 
     # Compare maximum difference across slices
     plt.plot(range(1, NUM_ITERATIONS + 1), np.amax(nmse_lists_GS, axis=0) - np.amin(nmse_lists_GS, axis=0), label="GS")

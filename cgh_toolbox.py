@@ -14,9 +14,8 @@ import torch
 import torchvision
 import scipy.interpolate
 import numpy as np
-# import pytorch_msssim
 
-DEFAULT_PITCH_SIZE = 0.00000425  # 0000136
+DEFAULT_PITCH_SIZE = 0.00000425
 DEFAULT_WAVELENGTH = 0.0000006607
 
 
@@ -35,6 +34,7 @@ def generate_checkerboard_image(vertical_size=512, horizontal_size=512, size=2):
                 else:
                     checkerboard_array[v_i][h_i] = 255
     return np.array([checkerboard_array])
+
 
 def generate_grid_image(vertical_size=512, horizontal_size=512, vertical_spacing=2, horizontal_spacing=2):
     grid_array = np.zeros((vertical_size, horizontal_size))
@@ -58,7 +58,7 @@ def zero_pad_to_size(input_tensor, target_height=5120, target_width=5120):
 def save_image(filename, image_tensor, tensor_dynamic_range=None):
     if tensor_dynamic_range is None:
         tensor_dynamic_range = image_tensor.max()
-        print("save_image_dynamic_range" + filename, tensor_dynamic_range.tolist())
+        print("save_image_dynamic_range: " + filename, tensor_dynamic_range.tolist())
     torchvision.io.write_png((image_tensor / tensor_dynamic_range * 255.0).to(torch.uint8), filename + ".png", compression_level=0)
 
 
@@ -84,19 +84,17 @@ def hologram_encoding_gamma_correct_linear(gamma_correct_me, pre_gamma_grey_valu
 def save_hologram_and_its_recons(hologram, distances, alg_name, pitch_size=DEFAULT_PITCH_SIZE, wavelength=DEFAULT_WAVELENGTH, filename_note=''):
     print("phase mean: ", hologram.angle().mean().item(), "max: ", hologram.angle().max().item(), "min: ", hologram.angle().min().item())
     phase_hologram = hologram.detach().cpu().angle() % (2*math.pi) / (2*math.pi) * 255.0
-    print("encoded holo mean: ", phase_hologram.mean().item(), "max: ", phase_hologram.max().item(), "min: ", phase_hologram.min().item())
-    if not os.path.isdir('Output\{}'.format(alg_name)):
-        os.makedirs('Output\{}'.format(alg_name))
-    save_image('.\Output\{0}\{0}_holo_{1:.2f}m{2}'.format(alg_name, distances[0], filename_note), phase_hologram, 255.0)
+    # gamma_corrected_phase_hologram = hologram_encoding_gamma_correct_linear(phase_hologram)
 
-    gamma_corrected_phase_hologram = hologram_encoding_gamma_correct_linear(phase_hologram)
-    print("Sony holo mean: ", gamma_corrected_phase_hologram.mean().item(), "max: ", gamma_corrected_phase_hologram.max().item(), "min: ", gamma_corrected_phase_hologram.min().item())
-    save_image('.\Output\{0}\{0}_sony_holo_{1:.2f}m{2}'.format(alg_name, distances[0], filename_note), gamma_corrected_phase_hologram, 255.0)
-    # save_image('.\Output\{0}\{0}_sony_holo_{1:.2f}m_cropped'.format(alg_name, distances[0]), torchvision.transforms.CenterCrop((1080, 1920))(gamma_corrected_phase_hologram), 255.0)
+    # print("encoded holo mean: ", phase_hologram.mean().item(), "max: ", phase_hologram.max().item(), "min: ", phase_hologram.min().item())
+    if not os.path.isdir(os.path.join('Output', alg_name)):
+        os.makedirs(os.path.join('Output', alg_name))
+    save_image(os.path.join('Output', alg_name, '{}_holo_{:.2f}m{}'.format(alg_name, distances[0], filename_note)), phase_hologram, 255.0)
+
     for distance in distances:
         reconstruction_abs = fresnel_propergation(hologram, distance, pitch_size=pitch_size, wavelength=wavelength).abs()
         reconstruction_normalised = energy_conserve(reconstruction_abs)
-        save_image('.\Output\{0}\{0}_recon_{1:.2f}m{2}'.format(alg_name, distance, filename_note), reconstruction_normalised.detach().cpu())
+        save_image(os.path.join('Output', alg_name, '{}_recon_{:.2f}m{}'.format(alg_name, distance, filename_note)), reconstruction_normalised.detach().cpu())
 
 
 def add_zeros_below(target_field):
@@ -349,7 +347,7 @@ def gerchberg_saxton_3d_sequential_slicing(target_fields, distances, iteration_n
     return A.detach().cpu(), nmse_lists, time_list
 
 
-def lbfgs_cgh_3d(target_fields, distances, sequential_slicing=False, wavelength=DEFAULT_WAVELENGTH, pitch_size=DEFAULT_PITCH_SIZE,
+def optim_cgh_3d(target_fields, distances, sequential_slicing=False, wavelength=DEFAULT_WAVELENGTH, pitch_size=DEFAULT_PITCH_SIZE,
                  save_progress=False, iteration_number=20, cuda=False, learning_rate=0.1, record_all_nmse=True, optimise_algorithm="LBFGS",
                  grad_history_size=10, loss_function=torch.nn.MSELoss(reduction="sum"), energy_conserv_scaling=1.0, time_limit=None,
                  initial_phase='random', smooth_holo_kernel_size=None):
@@ -480,8 +478,8 @@ def freeman_projector_encoding(holograms, alg_name='MultiFrame', filename_note='
 
 
 def save_multi_frame_holograms_and_their_recons(holograms, reconstructions=None, recon_dynamic_range=None, alg_name='MultiFrame', filename_note=''):
-    if not os.path.isdir(os.path.join('Output','{}'.format(alg_name))):
-        os.makedirs(os.path.join('Output','{}'.format(alg_name)))
+    if not os.path.isdir(os.path.join('Output', '{}'.format(alg_name))):
+        os.makedirs(os.path.join('Output', '{}'.format(alg_name)))
     freeman_projector_encoding(holograms)
 
     if reconstructions is None:
@@ -498,8 +496,6 @@ def save_multi_frame_holograms_and_their_recons(holograms, reconstructions=None,
             reconstruction_abs = fraunhofer_propergation(hologram).abs()
             reconstruction_normalised = energy_conserve(reconstruction_abs)
             save_image(os.path.join('Output', alg_name, '{}_recon{}{}'.format(alg_name, hologram_i, filename_note)), reconstruction_normalised.detach().cpu(), recon_dynamic_range)
-
-
     else:
         for hologram_i, hologram in enumerate(holograms):
             phase_hologram = hologram.detach().cpu().angle() % (math.pi) / (math.pi) * 255.0
@@ -507,7 +503,7 @@ def save_multi_frame_holograms_and_their_recons(holograms, reconstructions=None,
 
         for reconstruction_i, reconstruction in enumerate(reconstructions):
             reconstruction_normalised = energy_conserve(reconstruction)
-            save_image(os.path.join('Output', alg_name, '{}_recon{}{}'.format(alg_name, hologram_i, filename_note)), reconstruction_normalised.detach().cpu(), recon_dynamic_range)
+            save_image(os.path.join('Output', alg_name, '{}_recon{}{}'.format(alg_name, reconstruction_i, filename_note)), reconstruction_normalised.detach().cpu(), recon_dynamic_range)
 
 
 def multi_frame_cgh(target_fields, distances, wavelength=DEFAULT_WAVELENGTH, pitch_size=DEFAULT_PITCH_SIZE,
@@ -557,7 +553,7 @@ def multi_frame_cgh(target_fields, distances, wavelength=DEFAULT_WAVELENGTH, pit
         reconstructions = reconstructions.mean(dim=0)
         reconstructions = energy_conserve(reconstructions, energy_conserv_scaling)
         if save_progress or (i == iteration_number - 1):
-            save_image(os.path.join('Output','MultiFrame', 'MultiFrame_mean'), reconstructions.detach().cpu(), target_fields.detach().cpu().max())
+            save_image(os.path.join('Output', 'MultiFrame', 'MultiFrame_mean'), reconstructions.detach().cpu(), target_fields.detach().cpu().max())
 
         # Calculate loss for all slices (stacked in reconstructions)
         loss = loss_function(torch.flatten(reconstructions / target_fields.max()).expand(1, -1),
