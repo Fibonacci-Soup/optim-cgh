@@ -8,9 +8,7 @@ This is the python script for entropy investigation on CGH
 """
 
 import os
-import time
 import torch
-import torchvision
 import numpy
 from PIL import Image, ImageOps
 import cgh_toolbox

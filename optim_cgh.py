@@ -51,7 +51,7 @@ def main():
 
     # Check for mismatch between numbers of distances and images given
     if len(distances) != len(target_fields):
-        raise Exception("Different numbers of distances and images are given!")
+        raise ValueError("Different numbers of distances and images are given!")
 
     print("INFO: {} target fields loaded".format(len(target_fields)))
 
