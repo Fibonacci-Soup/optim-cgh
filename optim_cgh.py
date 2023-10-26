@@ -12,56 +12,47 @@ consisted of multiple slices of 2D images at different distances.
 import os
 import time
 import torch
-import torchvision
 import matplotlib.pyplot as plt
 import numpy as np
 import cgh_toolbox
 
 # Experimental setup - device properties
-# SLM and laser info
-PITCH_SIZE = 0.00000425  # 0.0000136
-WAVELENGTH = 0.0000006607
+PITCH_SIZE = 0.00000425  # Pitch size of the SLM
+WAVELENGTH = 0.0000006607  # Wavelength of the laser
+ENERGY_CONSERVATION_SCALING = 1.0  # Scaling factor when conserving the energy of images across different slices
 
 
 def main():
     NUM_ITERATIONS = 100
     SEQUENTIAL_SLICING = False
-    ENERGY_CONSERVATION_SCALING = 1.0
     PLOT_EACH_SLICE = False
 
-    # Load target images
+    # 1.A Option1: Load target images from files (please use PNG format with zero compression, even although PNG compression is lossless)
     images = [os.path.join('Target_images', x) for x in ['A.png', 'B.png', 'C.png', 'D.png']]
-    target_fields_list = []
-    for image_name in images:
-        target_field = torchvision.io.read_image(image_name, torchvision.io.ImageReadMode.GRAY).to(torch.float64)
-        # target_field = torch.nn.functional.interpolate(target_field.expand(1, -1, -1, -1), (512, 1024))[0]
-        # target_field = cgh_toolbox.zero_pad_to_size(target_field, target_height=1080, target_width=1920)
-        target_field_normalised = cgh_toolbox.energy_conserve(target_field, ENERGY_CONSERVATION_SCALING)
-        target_fields_list.append(target_field_normalised)
-    # Or generate target fields for specific patterns
-    # target_field = torch.from_numpy(cgh_toolbox.generate_grid_image(vertical_size=1080, horizontal_size=1920, vertical_spacing=20, horizontal_spacing=20))
-    # target_field_normalised = cgh_toolbox.energy_conserve(target_field, ENERGY_CONSERVATION_SCALING)
-    # target_fields_list.append(target_field_normalised)
+    target_fields = cgh_toolbox.load_target_images(images, energy_conserv_scaling=ENERGY_CONSERVATION_SCALING)
 
-    target_fields = torch.stack(target_fields_list)
+    # 1.B Option2: Generate target fields of specific patterns (e.g. grid pattern here)
+    # target_fields_list = []
+    # for spacing in range(10, 41, 10):
+    #     target_pattern = cgh_toolbox.generate_grid_pattern(vertical_size=1024, horizontal_size=1024, vertical_spacing=spacing, horizontal_spacing=spacing)
+    #     target_fields_list.append(target_pattern)
+    # target_fields = torch.stack(target_fields_list)
 
-    # Set distances for each target image
-    distances = [.01, .02, .03, .04]
-    # distances = [0.09 + i*0.0001 for i in range(len(images))]
+    # 2. Set distances according to each slice of the target
+    distances = [0.01 + i*0.01 for i in range(len(target_fields))]
 
-    # Check for mismatch between numbers of distances and images given
+    # 3. Check for mismatch between numbers of distances and images given
     if len(distances) != len(target_fields):
         raise ValueError("Different numbers of distances and images are given!")
-
     print("INFO: {} target fields loaded".format(len(target_fields)))
 
-    # Check if output folder exists, then save copies of target_fields
+    # 4. Check if output folder exists, then save copies of target_fields
     if not os.path.isdir('Output'):
         os.makedirs('Output')
     for i, target_field in enumerate(target_fields):
-        cgh_toolbox.save_image(r'.\Output\Target_field_{}'.format(i), target_field)
+        cgh_toolbox.save_image(os.path.join('Output', 'Target_field_{}'.format(i)), target_field)
 
-    # Carry out GS with SS
+    # 5. Carry out GS with SS
     time_start = time.time()
     hologram, nmse_lists_GS, time_list_GS = cgh_toolbox.gerchberg_saxton_3d_sequential_slicing(
         target_fields, distances, iteration_number=NUM_ITERATIONS, weighting=0, pitch_size=PITCH_SIZE, wavelength=WAVELENGTH)
@@ -78,7 +69,7 @@ def main():
         plt.show()
     print(to_print)
 
-    # Carry out DCGS
+    # 6. Carry out DCGS
     time_start = time.time()
     hologram, nmse_lists_DCGS, time_list_DCGS = cgh_toolbox.gerchberg_saxton_3d_sequential_slicing(
         target_fields, distances, iteration_number=NUM_ITERATIONS, weighting=0.001, pitch_size=PITCH_SIZE, wavelength=WAVELENGTH)
@@ -95,7 +86,7 @@ def main():
         plt.show()
     print(to_print)
 
-    # Carry out GD with MSE
+    # 7. Carry out GD with MSE
     time_start = time.time()
     hologram, nmse_lists_GD_MSE, time_list_GD_MSE = cgh_toolbox.optim_cgh_3d(
         target_fields,
@@ -122,7 +113,7 @@ def main():
         plt.show()
     print(to_print)
 
-    # Carry out LBFGS with RE
+    # 8. Carry out LBFGS with RE
     time_start = time.time()
     hologram, nmse_lists_LBFGS_RE, time_list_LBFGS_RE = cgh_toolbox.optim_cgh_3d(
         target_fields,
@@ -150,7 +141,7 @@ def main():
         plt.show()
     print(to_print)
 
-    # Compare maximum difference across slices
+    # 9. Compare maximum difference across slices
     plt.plot(range(1, NUM_ITERATIONS + 1), np.amax(nmse_lists_GS, axis=0) - np.amin(nmse_lists_GS, axis=0), label="GS")
     plt.plot(range(1, NUM_ITERATIONS + 1), np.amax(nmse_lists_DCGS, axis=0) - np.amin(nmse_lists_DCGS, axis=0), label="DCGS")
     plt.plot(range(1, NUM_ITERATIONS + 1), np.amax(nmse_lists_GD_MSE, axis=0) - np.amin(nmse_lists_GD_MSE, axis=0), label="GD_MSE")
@@ -160,7 +151,7 @@ def main():
     plt.legend()
     plt.show()
 
-    # Compare the average among slices
+    # 10. Compare the average among slices
     plt.plot(range(1, NUM_ITERATIONS + 1), np.mean(nmse_lists_GS, axis=0), label="GS")
     plt.plot(range(1, NUM_ITERATIONS + 1), np.mean(nmse_lists_DCGS, axis=0), label="DCGS")
     plt.plot(range(1, NUM_ITERATIONS + 1), np.mean(nmse_lists_GD_MSE, axis=0), label="GD_MSE")

@@ -12,16 +12,16 @@ import time
 import math
 import torch
 import torchvision
-import scipy.interpolate
 import numpy as np
 
-DEFAULT_PITCH_SIZE = 0.00000425
-DEFAULT_WAVELENGTH = 0.0000006607
+DEFAULT_PITCH_SIZE = 0.00000425  # Default pitch size of the SLM
+DEFAULT_WAVELENGTH = 0.0000006607  # Default wavelength of the laser
+DEFAULT_ENERGY_CONSERVATION_SCALING = 1.0  # Default scaling factor when conserving the energy of images across different slices
 
 
-def load_image(filename):
+def read_image_to_tensor(filename):
     """
-    Load an image file (please use PNG format with no compression)  to pytorch tensor converted to floating points.
+    Read an image file (please use PNG format with no compression) to pytorch tensor converted to floating points.
     You are welcomed to try other modules for other formats, torchvision turns out the best option for me.
     (If you use PIL, be careful with their channel index and type conversions)
 
@@ -31,13 +31,34 @@ def load_image(filename):
     return torchvision.io.read_image(filename, torchvision.io.ImageReadMode.GRAY).to(torch.float64)
 
 
+def load_target_images(filenames=[os.path.join('Target_images', 'A.png')], energy_conserv_scaling=DEFAULT_ENERGY_CONSERVATION_SCALING):
+    """
+    Load multiple image files to a pytorch tensor (please use PNG format with no compression)
+    for single files, simply put a list of one element to filenames
+
+    :param filenames: list of filenames to load from (Default is an example file)
+    :param energy_conserv_scaling: all target images and reconstructions are conserved to have the same total energy (Default: 1.0)
+    :returns pytorch.tensor: a tensor of all loaded images
+    """
+    target_fields_list = []
+    for filename in filenames:
+        target_field = read_image_to_tensor(filename)
+        # The following commented-out code might be useful for resizing and zero padding the target images
+        # target_field = torch.nn.functional.interpolate(target_field.expand(1, -1, -1, -1), (1024, 1280))[0]
+        # target_field = zero_pad_to_size(target_field, target_height=1080, target_width=1920)
+        target_field_normalised = energy_conserve(target_field, energy_conserv_scaling)
+        target_fields_list.append(target_field_normalised)
+    target_fields = torch.stack(target_fields_list)
+    return target_fields
+
+
 def save_image(filename, image_tensor, tensor_dynamic_range=None):
     """
     Save a tensor respresenting an image to a file.
 
     :param filename: name of file to save to
     :param image_tensor: tensor representing the image
-    :param tensor_dynamic_range: dynamic range when saving the image (default: None, which will be the maximum value of the tensor)
+    :param tensor_dynamic_range: dynamic range when saving the image (default: None, which will be assigned the maximum value of the tensor)
     """
     if tensor_dynamic_range is None:
         tensor_dynamic_range = image_tensor.max()
@@ -45,14 +66,14 @@ def save_image(filename, image_tensor, tensor_dynamic_range=None):
     torchvision.io.write_png((image_tensor / tensor_dynamic_range * 255.0).to(torch.uint8), filename + ".png", compression_level=0)
 
 
-def generate_checkerboard_image(vertical_size=512, horizontal_size=512, square_size=2):
+def generate_checkerboard_pattern(vertical_size=512, horizontal_size=512, square_size=2):
     """
     Generate a checkerboard pattern of given dimensions.
 
     :param vertical_size: vertical size of the overall pattern
     :param horizonal_size: horizontal size of the overall pattern
     :param square_size: the size of the squares in the checkerboard pattern
-    :returns np.array: the checkerboard patthern
+    :returns: tensor having the checkerboard patthern
     """
     checkerboard_array = np.zeros((vertical_size, horizontal_size))
     for v_i in range(0, vertical_size):
@@ -67,18 +88,18 @@ def generate_checkerboard_image(vertical_size=512, horizontal_size=512, square_s
                     checkerboard_array[v_i][h_i] = 0
                 else:
                     checkerboard_array[v_i][h_i] = 255
-    return np.array([checkerboard_array])
+    return energy_conserve(torch.from_numpy(np.array([checkerboard_array])))
 
 
-def generate_grid_image(vertical_size=512, horizontal_size=512, vertical_spacing=2, horizontal_spacing=2):
+def generate_grid_pattern(vertical_size=512, horizontal_size=512, vertical_spacing=2, horizontal_spacing=2):
     """
     Generate a grid pattern of given dimensions.
 
-    :param vertical_size: vertical size of the overall pattern
-    :param horizonal_size: horizontal size of the overall pattern
-    :param vertical_spacing: vertical spacing between lines
-    :param horizontal_spacing: horizontal spacing between lines
-    :returns np.array: the grid patthern
+    :param vertical_size: vertical size of the overall pattern (Default: 512)
+    :param horizonal_size: horizontal size of the overall pattern (Default: 512)
+    :param vertical_spacing: vertical spacing between lines (Default: 2)
+    :param horizontal_spacing: horizontal spacing between lines (Default: 2)
+    :returns: tensor having the grid pattern
     """
     grid_array = np.zeros((vertical_size, horizontal_size))
     for v_i in range(0, vertical_size):
@@ -86,7 +107,7 @@ def generate_grid_image(vertical_size=512, horizontal_size=512, vertical_spacing
             if (v_i % vertical_spacing == 0) or (h_i % horizontal_spacing == 0) or \
                     (v_i % vertical_spacing == vertical_spacing-1) or (h_i % horizontal_spacing == horizontal_spacing-1):
                 grid_array[v_i][h_i] = 1
-    return np.array([grid_array])
+    return energy_conserve(torch.from_numpy(np.array([grid_array])))
 
 
 def zero_pad_to_size(input_tensor, target_height=5120, target_width=5120):
@@ -94,8 +115,8 @@ def zero_pad_to_size(input_tensor, target_height=5120, target_width=5120):
     Zero pad a tensor to target height and width.
 
     :param input_tensor: input tensor to be zero padded
-    :param target_height: target total height after zero padding
-    :param target_width: target total width after zero padding
+    :param target_height: target total height after zero padding (Default: 5120)
+    :param target_width: target total width after zero padding (Default: 5120)
     :returns pytorch.tensor: the zero padded tensor
     """
     zero_pad_left = int((target_width - input_tensor.shape[-1]) / 2)
@@ -111,6 +132,7 @@ def hologram_encoding_gamma_correct_linear(gamma_correct_me, pre_gamma_grey_valu
     (Deprecated, for reference only)
     Originally written by Andrew Kadis, who worked on the Sony SLM which needed this function.
     """
+    import scipy.interpolate
     if pre_gamma_grey_values is None:
         pre_gamma_grey_values = [0, 15, 31, 47, 63, 79, 95, 111, 127, 143, 159, 175, 191, 207, 223, 239, 255]
     if post_gamma_grey_values is None:
@@ -129,7 +151,17 @@ def hologram_encoding_gamma_correct_linear(gamma_correct_me, pre_gamma_grey_valu
     return torch.tensor(interpolated_values)
 
 
-def save_hologram_and_its_recons(hologram, distances, alg_name, pitch_size=DEFAULT_PITCH_SIZE, wavelength=DEFAULT_WAVELENGTH, filename_note=''):
+def save_hologram_and_its_recons(hologram, distances=[9999999], alg_name="unspecified_algorithm", pitch_size=DEFAULT_PITCH_SIZE, wavelength=DEFAULT_WAVELENGTH, filename_note=''):
+    """
+    Save a hologram and its reconstructions at specified distances to the Output folder.
+
+    :param hologram: the hologram tensor
+    :param distances: list of distances in meters (Default: [9999999])
+    :param alg_name: string specifying the algorithm name, for clearer file naming (Default: "unspecified_algorithm")
+    :param pitch_size: pitch size of the spatial light modulator (SLM) which displays the hologram (Default: DEFAULT_PITCH_SIZE)
+    :param wavelength: wavelength of the light source (Default: DEFAULT_WAVELENGTH)
+    :param filename_note: option to add extra note to the end of the file (Default: "")
+    """
     print("phase mean: ", hologram.angle().mean().item(), "max: ", hologram.angle().max().item(), "min: ", hologram.angle().min().item())
     phase_hologram = hologram.detach().cpu().angle() % (2*math.pi) / (2*math.pi) * 255.0
     # gamma_corrected_phase_hologram = hologram_encoding_gamma_correct_linear(phase_hologram)
@@ -207,10 +239,10 @@ def fresnel_propergation(hologram, distance=2, pitch_size=DEFAULT_PITCH_SIZE, wa
         end
 
     :param torch.tensor hologram: input tensor representing the hologram
-    :param distance: distance of Fresnel propergation
-    :param pitch_size: pitch size of the spatial light modulator (SLM) which displays the hologram
-    :param wavelength: wavelength of the light source
-    :returns: the reconstruction of the hologram at the requested distance
+    :param distance: distance of Fresnel propergation in meters (Default: 2)
+    :param pitch_size: pitch size of the spatial light modulator (SLM) which displays the hologram (Default: DEFAULT_PITCH_SIZE)
+    :param wavelength: wavelength of the light source (Default: DEFAULT_WAVELENGTH)
+    :returns: the reconstruction of the hologram at the requested distance (complex valued)
     """
     distance = torch.tensor([distance]).to(hologram.device)
     holo_height = hologram.shape[-2]
@@ -237,10 +269,10 @@ def fresnel_backward_propergation(field, distance=2, pitch_size=DEFAULT_PITCH_SI
     Fresnel backward propergation
 
     :param torch.tensor hologram: input tensor representing the replay field
-    :param distance: distance of Fresnel propergation
-    :param pitch_size: pitch size of the spatial light modulator (SLM) which displays the hologram
-    :param wavelength: wavelength of the light source
-    :returns: the reconstruction of the hologram at the requested distance
+    :param distance: distance of Fresnel propergation in meters (Default: 2)
+    :param pitch_size: pitch size of the spatial light modulator (SLM) which displays the hologram (Default: DEFAULT_PITCH_SIZE)
+    :param wavelength: wavelength of the light source (Default: DEFAULT_WAVELENGTH)
+    :returns: the hologram of the reconstruction at the requested distance (complex valued)
     """
     distance = torch.tensor([distance]).to(field.device)
     holo_height = field.shape[-2]
@@ -262,7 +294,13 @@ def fresnel_backward_propergation(field, distance=2, pitch_size=DEFAULT_PITCH_SI
     return u1
 
 
-def generate_quadradic_phase(size, scaling=0.00002):
+def generate_quadratic_phase(size=[1024, 1024], scaling=0.00002):
+    """
+    Generate an initial phase hologram having a quadratic pattern starting from the center.
+
+    :param size: the dimension of the hologram (Default: [1024, 1024])
+    :param scaling: a scaling to control the gradient of the quadratic increase (Default: 0.00002)
+    """
     holo_height = size[0]
     holo_width = size[1]
 
@@ -274,7 +312,13 @@ def generate_quadradic_phase(size, scaling=0.00002):
     return h
 
 
-def generate_linear_phase(size, scaling=0.1):
+def generate_linear_phase(size=[1024, 1024], scaling=0.1):
+    """
+    Generate an initial phase hologram having a linearly increasing pattern starting from the center.
+
+    :param size: the dimension of the hologram (Default: [1024, 1024])
+    :param scaling: a scaling to control the gradient of the linear increase (Default: 0.1)
+    """
     holo_height = size[0]
     holo_width = size[1]
 
@@ -287,6 +331,9 @@ def generate_linear_phase(size, scaling=0.1):
 
 
 def low_pass_filter_2d(img, filter_rate=1):
+    """
+    (Deprecated, an attempt to implement low pass filter, has not turned out to be useful yet)
+    """
     fft_img = torch.fft.fft2(img)
     h = img.shape[-2]
     w = img.shape[-1]
@@ -309,7 +356,7 @@ def energy_match(field, target_field):
     return field * torch.sqrt((target_field**2).sum() / (field**2).sum())
 
 
-def energy_conserve(field, scaling=1.0):
+def energy_conserve(field, scaling=DEFAULT_ENERGY_CONSERVATION_SCALING):
     """
     Conserve the energy of the tensor to a uniform amplitude tensor of the same dimension.
     The idea of this function is to speed up energy matching, as all targets and reconstructions are matched
@@ -402,7 +449,7 @@ def gerchberg_saxton_3d_sequential_slicing(target_fields, distances, iteration_n
 
     amplitude = torch.ones(target_fields[0].size(), requires_grad=False).to(torch.float64).to(device)
     phase = ((torch.rand(target_fields[0].size()) * 2 - 1) * math.pi).to(torch.float64).to(device)
-    # phase = (torch.ones(target_fields[0].size()) * generate_quadradic_phase([target_fields[0].shape[-2], target_fields[0].shape[-1]], 0.00001)).to(torch.float64).detach().to(device)
+    # phase = (torch.ones(target_fields[0].size()) * generate_quadratic_phase([target_fields[0].shape[-2], target_fields[0].shape[-1]], 0.00001)).to(torch.float64).detach().to(device)
     A = amplitude * torch.exp(1j * phase)
 
     nmse_lists = []
@@ -440,7 +487,7 @@ def gerchberg_saxton_3d_sequential_slicing(target_fields, distances, iteration_n
 
 def optim_cgh_3d(target_fields, distances, sequential_slicing=False, wavelength=DEFAULT_WAVELENGTH, pitch_size=DEFAULT_PITCH_SIZE,
                  save_progress=False, iteration_number=20, cuda=False, learning_rate=0.1, record_all_nmse=True, optimise_algorithm="LBFGS",
-                 grad_history_size=10, loss_function=torch.nn.MSELoss(reduction="sum"), energy_conserv_scaling=1.0, time_limit=None,
+                 grad_history_size=10, loss_function=torch.nn.MSELoss(reduction="sum"), energy_conserv_scaling=DEFAULT_ENERGY_CONSERVATION_SCALING, time_limit=None,
                  initial_phase='random', smooth_holo_kernel_size=None):
     """
     Carry out L-BFGS optimisation of CGH for a 3D target consisted of multiple slices of 2D images at different distances.
@@ -484,7 +531,7 @@ def optim_cgh_3d(target_fields, distances, sequential_slicing=False, wavelength=
         phase = (torch.ones(target_fields[0].size()) * generate_linear_phase([target_fields[0].shape[-2], target_fields[0].shape[-1]], 0.5)).to(torch.float64).detach().to(device).requires_grad_()
     elif initial_phase.lower() in ['quadratic', 'quad']:
         # linear initial phase
-        phase = (torch.ones(target_fields[0].size()) * generate_quadradic_phase([target_fields[0].shape[-2],
+        phase = (torch.ones(target_fields[0].size()) * generate_quadratic_phase([target_fields[0].shape[-2],
                  target_fields[0].shape[-1]], 0.00002)).to(torch.float64).detach().to(device).requires_grad_()
     else:
         raise Exception("The required initial phase is not recognised!")
@@ -563,7 +610,7 @@ def optim_cgh_3d(target_fields, distances, sequential_slicing=False, wavelength=
 
 def freeman_projector_encoding(holograms, alg_name='MultiFrame', filename_note=''):
     """
-    Experiment in progress (Code for my ongoing project: Multi Fram Phase-Only Hologram Optimisation)
+    (Experiment in progress. Code for my ongoing project: Multi Fram Phase-Only Hologram Optimisation)
     """
     binary_hologram = torch.round(holograms.detach().cpu().angle() / math.pi)
     freeman_hologram = torch.zeros(3, holograms.size(-2), holograms.size(-1))
@@ -580,7 +627,7 @@ def freeman_projector_encoding(holograms, alg_name='MultiFrame', filename_note='
 
 def save_multi_frame_holograms_and_their_recons(holograms, reconstructions=None, recon_dynamic_range=None, alg_name='MultiFrame', filename_note=''):
     """
-    Experiment in progress (Code for my ongoing project: Multi Fram Phase-Only Hologram Optimisation)
+    (Experiment in progress. Code for my ongoing project: Multi Fram Phase-Only Hologram Optimisation)
     """
     if not os.path.isdir(os.path.join('Output', '{}'.format(alg_name))):
         os.makedirs(os.path.join('Output', '{}'.format(alg_name)))
@@ -612,10 +659,10 @@ def save_multi_frame_holograms_and_their_recons(holograms, reconstructions=None,
 
 def multi_frame_cgh(target_fields, distances, wavelength=DEFAULT_WAVELENGTH, pitch_size=DEFAULT_PITCH_SIZE,
                     iteration_number=20, cuda=False, learning_rate=0.1, save_progress=True, optimise_algorithm="LBFGS",
-                    grad_history_size=10, loss_function=torch.nn.MSELoss(reduction="sum"), energy_conserv_scaling=1.0, time_limit=None,
+                    grad_history_size=10, loss_function=torch.nn.MSELoss(reduction="sum"), energy_conserv_scaling=DEFAULT_ENERGY_CONSERVATION_SCALING, time_limit=None,
                     num_frames=8):
     """
-    Experiment in progress (Code for my ongoing project: Multi Fram Phase-Only Hologram Optimisation)
+    (Experiment in progress. Code for my ongoing project: Multi Fram Phase-Only Hologram Optimisation)
     """
     time_start = time.time()
     torch.cuda.empty_cache()
@@ -637,7 +684,7 @@ def multi_frame_cgh(target_fields, distances, wavelength=DEFAULT_WAVELENGTH, pit
     elif optimise_algorithm.lower() == "adam":
         optimiser = torch.optim.Adam([phases], lr=learning_rate)
     else:
-        raise Exception("Optimiser is not recognised!")
+        raise NameError("Optimiser is not recognised!")
 
     time_list = []
     nmse_lists = []
