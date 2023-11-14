@@ -38,7 +38,7 @@ def main():
     #     target_fields_list.append(target_pattern)
     # target_fields = torch.stack(target_fields_list)
 
-    # 2. Set distances according to each slice of the target
+    # 2. Set distances according to each slice of the target (in meters)
     distances = [0.01 + i*0.01 for i in range(len(target_fields))]
 
     # 3. Check for mismatch between numbers of distances and images given

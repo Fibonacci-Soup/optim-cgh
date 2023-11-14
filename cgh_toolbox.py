@@ -399,11 +399,15 @@ def gerchberg_saxton_fraunhofer(target_field, iteration_number=50, manual_seed_v
         A = torch.fft.ifftshift(torch.fft.ifft2(torch.fft.ifftshift(E)))
         phase_hologram = A.angle()
         if hologram_quantization_bit_depth:
-            phase_hologram = torch.round(phase_hologram / math.pi * 2**(hologram_quantization_bit_depth-1)) / 2**(hologram_quantization_bit_depth-1) * math.pi
+            int_hologram = torch.round(phase_hologram / math.pi * 2**(hologram_quantization_bit_depth-1))
+            # make -pi to pi (e.g. 1 bit binary hologram will change values from [-1, 0, 1] to [0, 1])
+            int_hologram[int_hologram == -2**(hologram_quantization_bit_depth-1)] = 2**(hologram_quantization_bit_depth-1)
+            phase_hologram = int_hologram / 2**(hologram_quantization_bit_depth-1) * math.pi
+            # print("DEBUG: Bit depth is ", hologram_quantization_bit_depth, " quantized phase_hologram is:", phase_hologram)
         A = torch.exp(1j * phase_hologram)
     # save_image('.\\Output\\recon_bit_depth_{}'.format(hologram_quantization_bit_depth), E_norm.detach().cpu(), target_field.max().cpu())
     # save_image('.\\Output\\hologram_bit_depth_{}'.format(hologram_quantization_bit_depth), phase_hologram.detach().cpu(), math.pi)
-    return A, GS_NMSE_list
+    return A, GS_NMSE_list, phase_hologram
 
 
 def gerchberg_saxton_fraunhofer_smooth(target_field, iteration_number=50):
@@ -693,12 +697,14 @@ def multi_frame_cgh(target_fields, distances, wavelength=DEFAULT_WAVELENGTH, pit
     for i in range(iteration_number):
         print(i)
         optimiser.zero_grad()
-        if i > iteration_number / 4:
-            holograms = amplitude * torch.exp(1j * torch.nn.Sigmoid()(phases / math.pi) * math.pi)
+        if i > iteration_number * 3 / 4:
+            holograms = amplitude * torch.exp(1j * torch.nn.Sigmoid()(4 * phases / math.pi) * math.pi)
+        elif i > iteration_number / 2:
+            holograms = amplitude * torch.exp(1j * torch.nn.Sigmoid()(2 * phases / math.pi) * math.pi)
+        elif i > iteration_number / 4:
+            holograms = amplitude * torch.exp(1j * torch.nn.Sigmoid()(1.5 * phases / math.pi) * math.pi)
         else:
             holograms = amplitude * torch.exp(1j * phases)
-
-        # Propagate hologram for all distances
 
         reconstructions = fraunhofer_propergation(holograms).abs()
         if save_progress or (i == iteration_number - 1):
