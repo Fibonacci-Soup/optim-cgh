@@ -2,3 +2,4 @@ __pycache__/*
 Output/*
 .vscode/*
 lbfgs_cgh_2d.py
+Target_images/DIV2k*
