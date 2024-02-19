@@ -14,10 +14,10 @@ import torch
 import torchvision
 import numpy as np
 
-DEFAULT_PITCH_SIZE = 0.00000425  # Default pitch size of the SLM
-DEFAULT_WAVELENGTH = 0.0000006607  # Default wavelength of the laser
+DEFAULT_PITCH_SIZE = 13.62e-6  #0.00000425  # Default pitch size of the SLM
+DEFAULT_WAVELENGTH = 532e-9 #0.0000006607  # Default wavelength of the laser
 DEFAULT_ENERGY_CONSERVATION_SCALING = 1.0  # Default scaling factor when conserving the energy of images across different slices
-
+DATATYPE = torch.float32 # Switch to torch.float64 for better accuracy, but will need much more memory and computation resource
 
 def read_image_to_tensor(filename):
     """
@@ -28,7 +28,7 @@ def read_image_to_tensor(filename):
     :param filename: name of file to load from
     :returns pytorch.tensor: the loaded image
     """
-    return torchvision.io.read_image(filename, torchvision.io.ImageReadMode.GRAY).to(torch.float64)
+    return torchvision.io.read_image(filename, torchvision.io.ImageReadMode.GRAY).to(DATATYPE)
 
 
 def load_target_images(filenames=[os.path.join('Target_images', 'A.png')], energy_conserv_scaling=DEFAULT_ENERGY_CONSERVATION_SCALING):
@@ -88,10 +88,10 @@ def generate_checkerboard_pattern(vertical_size=512, horizontal_size=512, square
                     checkerboard_array[v_i][h_i] = 0
                 else:
                     checkerboard_array[v_i][h_i] = 255
-    return energy_conserve(torch.from_numpy(np.array([checkerboard_array])))
+    return torch.from_numpy(np.array([checkerboard_array]))
 
 
-def generate_grid_pattern(vertical_size=512, horizontal_size=512, vertical_spacing=2, horizontal_spacing=2):
+def generate_grid_pattern(vertical_size=512, horizontal_size=512, vertical_spacing=2, horizontal_spacing=2, line_thickness=1):
     """
     Generate a grid pattern of given dimensions.
 
@@ -99,15 +99,49 @@ def generate_grid_pattern(vertical_size=512, horizontal_size=512, vertical_spaci
     :param horizonal_size: horizontal size of the overall pattern (Default: 512)
     :param vertical_spacing: vertical spacing between lines (Default: 2)
     :param horizontal_spacing: horizontal spacing between lines (Default: 2)
+    :param line_thickness: thickness of the lines (Default: 1)
     :returns: tensor having the grid pattern
     """
     grid_array = np.zeros((vertical_size, horizontal_size))
     for v_i in range(0, vertical_size):
         for h_i in range(0, horizontal_size):
-            if (v_i % vertical_spacing == 0) or (h_i % horizontal_spacing == 0) or \
-                    (v_i % vertical_spacing == vertical_spacing-1) or (h_i % horizontal_spacing == horizontal_spacing-1):
+            if (v_i % vertical_spacing < line_thickness) or (h_i % horizontal_spacing < line_thickness) or \
+                    (v_i % vertical_spacing >= vertical_spacing-line_thickness) or (h_i % horizontal_spacing >= horizontal_spacing-line_thickness):
                 grid_array[v_i][h_i] = 1
-    return energy_conserve(torch.from_numpy(np.array([grid_array])))
+    return torch.from_numpy(np.array([grid_array]))
+
+def generate_dotted_grid_pattern(vertical_size=512, horizontal_size=512, vertical_spacing=2, horizontal_spacing=2, line_thickness=1):
+    """
+    Generate a grid pattern of given dimensions.
+
+    :param vertical_size: vertical size of the overall pattern (Default: 512)
+    :param horizonal_size: horizontal size of the overall pattern (Default: 512)
+    :param vertical_spacing: vertical spacing between lines (Default: 2)
+    :param horizontal_spacing: horizontal spacing between lines (Default: 2)
+    :param line_thickness: thickness of the lines (Default: 1)
+    :returns: tensor having the grid pattern
+    """
+    grid_array = np.zeros((vertical_size, horizontal_size))
+    for v_i in range(0, vertical_size):
+        for h_i in range(0, horizontal_size):
+            if (v_i % vertical_spacing < line_thickness) and (h_i % horizontal_spacing < line_thickness) or \
+               (v_i % vertical_spacing < line_thickness) and (h_i % horizontal_spacing >= horizontal_spacing-line_thickness) or \
+               (v_i % vertical_spacing >= vertical_spacing-line_thickness) and (h_i % horizontal_spacing < line_thickness) or \
+               (v_i % vertical_spacing >= vertical_spacing-line_thickness) and (h_i % horizontal_spacing >= horizontal_spacing-line_thickness):
+                grid_array[v_i][h_i] = 1
+    return torch.from_numpy(np.array([grid_array]))
+
+def generate_circle_pattern(radius=512):
+    xx, yy = np.mgrid[:2*radius, :2*radius]
+    circle = (xx - radius + 0.5) ** 2 + (yy - radius + 0.5) ** 2
+    solid_circle = circle <= (radius)**2
+    return torch.from_numpy(np.array([solid_circle]))
+
+def generate_donut_pattern(radius=512, line_thickness=1):
+    xx, yy = np.mgrid[:2*radius, :2*radius]
+    circle = (xx - radius + 0.5) ** 2 + (yy - radius + 0.5) ** 2
+    donut = (circle <= (radius)**2) & (circle > (radius - line_thickness)**2)
+    return torch.from_numpy(np.array([donut]))
 
 
 def zero_pad_to_size(input_tensor, target_height=5120, target_width=5120):
@@ -124,7 +158,7 @@ def zero_pad_to_size(input_tensor, target_height=5120, target_width=5120):
     zero_pad_top = int((target_height - input_tensor.shape[-2]) / 2)
     zero_pad_bottom = target_height - input_tensor.shape[-2] - zero_pad_top
     padded_image = torch.nn.ZeroPad2d((zero_pad_left, zero_pad_right, zero_pad_top, zero_pad_bottom))(input_tensor)
-    return padded_image
+    return padded_image.to(DATATYPE)
 
 
 def hologram_encoding_gamma_correct_linear(gamma_correct_me, pre_gamma_grey_values=None, post_gamma_grey_values=None):
@@ -184,7 +218,7 @@ def add_zeros_below(target_field):
     :param torch.tensor target_field: input tensor representing an image
     :returns: the image being added zeros of same dimensions below
     """
-    return torch.cat((target_field, torch.zeros([target_field.size(0), target_field.size(1)])), 0)
+    return torch.cat((target_field, torch.zeros(target_field.size())), -2)
 
 
 def add_up_side_down_replica_below(target_field):
@@ -194,8 +228,8 @@ def add_up_side_down_replica_below(target_field):
     :param torch.tensor target_field: input tensor representing an image
     :returns: the image being added an up side down replica below
     """
-    target_up_side_down = torch.rot90(target_field, 2, [0, 1])
-    return torch.cat((target_field, target_up_side_down), 0)
+    target_up_side_down = torch.rot90(target_field, 2, [-2, -1])
+    return torch.cat((target_field, target_up_side_down), -2)
 
 
 def flip_left_right(target_field):
@@ -251,17 +285,16 @@ def fresnel_propergation(hologram, distance=2, pitch_size=DEFAULT_PITCH_SIZE, wa
     x_lin = torch.linspace(-pitch_size * (holo_width - 1) / 2,
                            pitch_size * (holo_width - 1) / 2,
                            holo_width,
-                           dtype=torch.float32).to(hologram.device)
+                           dtype=DATATYPE).to(hologram.device)
     y_lin = torch.linspace(-pitch_size * (holo_height - 1) / 2,
                            pitch_size * (holo_height - 1) / 2,
                            holo_height,
-                           dtype=torch.float32).to(hologram.device)
+                           dtype=DATATYPE).to(hologram.device)
     y_meters, x_meters = torch.meshgrid(y_lin, x_lin, indexing='ij')
 
     h = (-1j)*torch.exp(-1j/(wavelength*distance) * math.pi * (x_meters**2 + y_meters**2))
-    U2 = h * hologram
-    u2 = torch.fft.fftshift(torch.fft.fft2(torch.fft.fftshift(U2)))
-    return u2
+    return torch.fft.fftshift(torch.fft.fft2(torch.fft.fftshift(h * hologram)))
+
 
 
 def fresnel_backward_propergation(field, distance=2, pitch_size=DEFAULT_PITCH_SIZE, wavelength=DEFAULT_WAVELENGTH):
@@ -281,11 +314,11 @@ def fresnel_backward_propergation(field, distance=2, pitch_size=DEFAULT_PITCH_SI
     x_lin = torch.linspace(-pitch_size * (holo_width - 1) / 2,
                            pitch_size * (holo_width - 1) / 2,
                            holo_width,
-                           dtype=torch.float32).to(field.device)
+                           dtype=DATATYPE).to(field.device)
     y_lin = torch.linspace(-pitch_size * (holo_height - 1) / 2,
                            pitch_size * (holo_height - 1) / 2,
                            holo_height,
-                           dtype=torch.float32).to(field.device)
+                           dtype=DATATYPE).to(field.device)
     y_meters, x_meters = torch.meshgrid(y_lin, x_lin, indexing='ij')
 
     h = (-1j)*torch.exp(-1j/(wavelength*distance) * math.pi * (x_meters**2 + y_meters**2))
@@ -383,7 +416,7 @@ def gerchberg_saxton_fraunhofer(target_field, iteration_number=50, manual_seed_v
     device = torch.device("cuda")
     target_field = target_field.to(device)
 
-    A = torch.exp(1j * ((torch.rand(target_field.size()) * 2 - 1) * math.pi).to(torch.float64)).to(device)
+    A = torch.exp(1j * ((torch.rand(target_field.size()) * 2 - 1) * math.pi).to(DATATYPE)).to(device)
     GS_NMSE_list = []
     for i in range(iteration_number):
         E = torch.fft.fftshift(torch.fft.fft2(torch.fft.fftshift(A)))
@@ -416,7 +449,7 @@ def gerchberg_saxton_fraunhofer_smooth(target_field, iteration_number=50):
     It was an experiment to try GS to generate smoother holograms, which did not turn out well.
     """
     torch.manual_seed(0)
-    A = torch.exp(1j * ((torch.rand(target_field.size()) * 2 - 1) * math.pi).to(torch.float64))
+    A = torch.exp(1j * ((torch.rand(target_field.size()) * 2 - 1) * math.pi).to(DATATYPE))
     GS_NMSE_list = []
     for i in range(iteration_number):
         E = torch.fft.fftshift(torch.fft.fft2(torch.fft.fftshift(A)))
@@ -451,9 +484,9 @@ def gerchberg_saxton_3d_sequential_slicing(target_fields, distances, iteration_n
     device = torch.device("cuda")
     target_fields = target_fields.to(device)
 
-    amplitude = torch.ones(target_fields[0].size(), requires_grad=False).to(torch.float64).to(device)
-    phase = ((torch.rand(target_fields[0].size()) * 2 - 1) * math.pi).to(torch.float64).to(device)
-    # phase = (torch.ones(target_fields[0].size()) * generate_quadratic_phase([target_fields[0].shape[-2], target_fields[0].shape[-1]], 0.00001)).to(torch.float64).detach().to(device)
+    amplitude = torch.ones(target_fields[0].size(), requires_grad=False).to(DATATYPE).to(device)
+    phase = ((torch.rand(target_fields[0].size()) * 2 - 1) * math.pi).to(DATATYPE).to(device)
+    # phase = (torch.ones(target_fields[0].size()) * generate_quadratic_phase([target_fields[0].shape[-2], target_fields[0].shape[-1]], 0.00001)).to(DATATYPE).detach().to(device)
     A = amplitude * torch.exp(1j * phase)
 
     nmse_lists = []
@@ -524,21 +557,21 @@ def optim_cgh_3d(target_fields, distances, sequential_slicing=False, wavelength=
     target_fields = target_fields.to(device)
 
     # Fixed unit amplitude
-    amplitude = torch.ones(target_fields[0].size(), requires_grad=False).to(torch.float64).to(device)
+    amplitude = torch.ones(target_fields[0].size(), requires_grad=False).to(DATATYPE).to(device)
 
     # Variable phase
     if initial_phase.lower() in ['random', 'rand']:
         # Random initial phase within [-pi, pi]
-        phase = ((torch.rand(target_fields[0].size()) * 2 - 1) * math.pi).to(torch.float64).detach().to(device).requires_grad_()
+        phase = ((torch.rand(target_fields[0].size()) * 2 - 1) * math.pi).to(DATATYPE).detach().to(device).requires_grad_()
     elif initial_phase.lower() in ['linear', 'lin']:
         # linear initial phase
-        phase = (torch.ones(target_fields[0].size()) * generate_linear_phase([target_fields[0].shape[-2], target_fields[0].shape[-1]], 0.5)).to(torch.float64).detach().to(device).requires_grad_()
+        phase = (torch.ones(target_fields[0].size()) * generate_linear_phase([target_fields[0].shape[-2], target_fields[0].shape[-1]], 0.5)).to(DATATYPE).detach().to(device).requires_grad_()
     elif initial_phase.lower() in ['quadratic', 'quad']:
         # linear initial phase
         phase = (torch.ones(target_fields[0].size()) * generate_quadratic_phase([target_fields[0].shape[-2],
-                 target_fields[0].shape[-1]], 0.00002)).to(torch.float64).detach().to(device).requires_grad_()
+                 target_fields[0].shape[-1]], 0.00002)).to(DATATYPE).detach().to(device).requires_grad_()
     else:
-        raise Exception("The required initial phase is not recognised!")
+        raise ValueError("The required initial phase is not recognised!")
 
     # Decide optimisation algorithm
     if optimise_algorithm.lower() in ["lbfgs", "l-bfgs"]:
@@ -548,7 +581,7 @@ def optim_cgh_3d(target_fields, distances, sequential_slicing=False, wavelength=
     elif optimise_algorithm.lower() == "adam":
         optimiser = torch.optim.Adam([phase], lr=learning_rate)
     else:
-        raise Exception("Optimiser is not recognised!")
+        raise ValueError("Optimiser is not recognised!")
 
     time_list = []
     nmse_lists = []
@@ -629,16 +662,16 @@ def freeman_projector_encoding(holograms, alg_name='MultiFrame', filename_note='
     return
 
 
-def save_multi_frame_holograms_and_their_recons(holograms, reconstructions=None, recon_dynamic_range=None, alg_name='MultiFrame', filename_note=''):
+def save_multi_frame_holograms_and_their_recons(holograms, distances, reconstructions=None, recon_dynamic_range=None, alg_name='MultiFrame', filename_note=''):
     """
     (Experiment in progress. Code for my ongoing project: Multi Fram Phase-Only Hologram Optimisation)
     """
     if not os.path.isdir(os.path.join('Output', '{}'.format(alg_name))):
         os.makedirs(os.path.join('Output', '{}'.format(alg_name)))
-    freeman_projector_encoding(holograms)
+    freeman_projector_encoding(holograms, filename_note = str(distances[0]))
 
     if reconstructions is None:
-        print("Reconstructions not given, re-doing computations from holograms")
+        print("Warning: Reconstructions not given, doing far field computations from holograms")
         for hologram_i, hologram in enumerate(holograms):
             # print("phase mean: ", hologram.angle().mean().item(), "max: ", hologram.angle().max().item(), "min: ", hologram.angle().min().item())
             phase_hologram = hologram.detach().cpu().angle() % (2*math.pi) / (2*math.pi) * 255.0
@@ -675,10 +708,10 @@ def multi_frame_cgh(target_fields, distances, wavelength=DEFAULT_WAVELENGTH, pit
     target_fields = target_fields.to(device)
 
     # Fixed unit amplitude
-    amplitude = torch.ones(target_fields[0].size(), requires_grad=False).to(torch.float32).to(device)
+    amplitude = torch.ones(target_fields[0].size(), requires_grad=False).to(DATATYPE).to(device)
 
     # Multi-frame phases
-    phases = ((torch.rand([num_frames] + list(target_fields[0].size())) * 2 - 1) * math.pi).to(torch.float32).detach().to(device).requires_grad_()
+    phases = ((torch.rand([num_frames] + list(target_fields[0].size())) * 2 - 1) * math.pi).to(DATATYPE).detach().to(device).requires_grad_()
 
     # Decide optimisation algorithm
     if optimise_algorithm.lower() in ["lbfgs", "l-bfgs"]:
@@ -706,13 +739,17 @@ def multi_frame_cgh(target_fields, distances, wavelength=DEFAULT_WAVELENGTH, pit
         else:
             holograms = amplitude * torch.exp(1j * phases)
 
-        reconstructions = fraunhofer_propergation(holograms).abs()
+
+        # Propagate hologram for all distances
+        reconstructions_list = []
+        for index, distance in enumerate(distances):
+            reconstruction_multi_frame = fresnel_propergation(holograms, distance=distance, pitch_size=pitch_size, wavelength=wavelength).abs()
+            reconstruction_multi_frame = reconstruction_multi_frame.mean(dim=0)
+            reconstructions_list.append(energy_conserve(reconstruction_multi_frame, energy_conserv_scaling))
+        reconstructions = torch.stack(reconstructions_list)
+
         if save_progress or (i == iteration_number - 1):
-            save_multi_frame_holograms_and_their_recons(holograms, reconstructions, recon_dynamic_range=target_fields.detach().cpu().max(), alg_name='MultiFrame')
-        reconstructions = reconstructions.mean(dim=0)
-        reconstructions = energy_conserve(reconstructions, energy_conserv_scaling)
-        if save_progress or (i == iteration_number - 1):
-            save_image(os.path.join('Output', 'MultiFrame', 'MultiFrame_mean'), reconstructions.detach().cpu(), target_fields.detach().cpu().max())
+            save_multi_frame_holograms_and_their_recons(holograms, distances, reconstructions, recon_dynamic_range=target_fields.detach().cpu().max(), alg_name='MultiFrame')
 
         # Calculate loss for all slices (stacked in reconstructions)
         loss = loss_function(torch.flatten(reconstructions / target_fields.max()).expand(1, -1),

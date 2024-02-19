@@ -10,47 +10,55 @@ This is the python script for multi frame hologram optimisation.
 import os
 import time
 import torch
-import torchvision
 import matplotlib.pyplot as plt
 import cgh_toolbox
 
 
 def main():
-
     NUM_ITERATIONS = 100
-    ENERGY_CONSERVATION_SCALING = 1.0
     SAVE_PROGRESS = False
 
+    # 1.A Option1: Load target images from files (please use PNG format with zero compression, even although PNG compression is lossless)
+    # images = [os.path.join('Target_images', x) for x in ['A.png', 'B.png', 'C.png', 'D.png']]
+    # target_fields = cgh_toolbox.load_target_images(images, energy_conserv_scaling=ENERGY_CONSERVATION_SCALING)
+
+
+    # 1.B Option2: Generate target fields of specific patterns (e.g. grid pattern here)
     target_fields_list = []
 
-    # Load target images
-    images = [os.path.join('Target_images', 'mandrill_smaller.png')]
-    for image_name in images:
-        target_field = torchvision.io.read_image(image_name, torchvision.io.ImageReadMode.GRAY).to(torch.float32)
-        target_field = torch.nn.functional.interpolate(target_field.expand(1, -1, -1, -1), (1024, 1280), mode='bilinear')[0]  # 1536, 2048
-        target_field = torch.sqrt(target_field)
-        # target_field = torchvision.transforms.functional.gaussian_blur(target_field, kernel_size=3)
-        # target_field = cgh_toolbox.zero_pad_to_size(target_field, target_height=1080, target_width=1920)
-        target_field_normalised = cgh_toolbox.energy_conserve(target_field, ENERGY_CONSERVATION_SCALING)
-        target_fields_list.append(target_field_normalised)
+    # square_pattern = cgh_toolbox.energy_conserve(cgh_toolbox.generate_grid_pattern(vertical_size=256, horizontal_size=256, vertical_spacing=256, horizontal_spacing=256, line_thickness=1))
+    # square_pattern = cgh_toolbox.zero_pad_to_size(square_pattern, target_height=512, target_width=512)
+    # square_pattern = cgh_toolbox.add_up_side_down_replica_below(square_pattern)
+    # square_pattern = cgh_toolbox.zero_pad_to_size(square_pattern, target_height=1024, target_width=1024)
 
-    # # Generate patterned target image
-    # target_field = torch.from_numpy(cgh_toolbox.generate_grid_image(vertical_size=1080, horizontal_size=1920, vertical_spacing=20, horizontal_spacing=20))
-    # # target_field = torch.nn.functional.interpolate(target_field.expand(1, -1, -1, -1), (1080, 1920))[0]
-    # # target_field = cgh_toolbox.zero_pad_to_size(target_field, target_height=1920, target_width=1920)
-    # target_field_normalised = cgh_toolbox.energy_conserve(target_field, ENERGY_CONSERVATION_SCALING)
-    # target_fields_list.append(target_field_normalised)
+    # square_dot_pattern = cgh_toolbox.generate_dotted_grid_pattern(vertical_size=256, horizontal_size=256, vertical_spacing=256, horizontal_spacing=256, line_thickness=8)
+    # square_dot_pattern = cgh_toolbox.zero_pad_to_size(square_dot_pattern, target_height=1024, target_width=1024)
+    # target_fields_list.append(square_dot_pattern)
+
+    # donut_pattern = cgh_toolbox.energy_conserve(cgh_toolbox.generate_donut_pattern(radius=128, line_thickness=1))
+    # donut_pattern = cgh_toolbox.zero_pad_to_size(donut_pattern, target_height=512, target_width=512)
+    # donut_pattern = cgh_toolbox.add_up_side_down_replica_below(donut_pattern)
+    # donut_pattern = cgh_toolbox.zero_pad_to_size(donut_pattern, target_height=1024, target_width=1024)
+
+    # target_fields_list.append(square_pattern)
+    # target_fields_list.append(donut_pattern)
+
+    for radius in [16 + 16*x for x in range(8)]:
+        target_fields_list.append(cgh_toolbox.energy_conserve(cgh_toolbox.zero_pad_to_size(cgh_toolbox.generate_circle_pattern(radius=radius), target_height=1024, target_width=1024)))
 
     target_fields = torch.stack(target_fields_list)
 
-    # Set distances for each target image
-    distances = [999999]
+
+    # 2. Set distances according to each slice of the target (in meters)
+    distances = [.19 - 0.01*x for x in range(8)]
+    # distances = [0.1, 0.2, 0.3, 0.4]
+    # distances = [0.15 * x / (0.15 - x) for x in distances]
     # distances = [0.01 + i*SLM_PITCH_SIZE for i in range(0, NUM_SLICES, 10)]
     # distances = [0.09 + i*0.0001 for i in range(len(images))]
 
     # Check for mismatch between numbers of distances and images given
     if len(distances) != len(target_fields):
-        raise Exception("Different numbers of distances and images are given!")
+        raise ValueError("Different numbers of distances and images are given!")
 
     print("INFO: {} target fields loaded".format(len(target_fields)))
 
@@ -61,7 +69,7 @@ def main():
         cgh_toolbox.save_image(os.path.join('Output', 'Target_field_{}'.format(i)), target_field)
 
     time_start = time.time()
-    hologram, nmse_lists_LBFGS_RE, time_list_LBFGS_RE = cgh_toolbox.multi_frame_cgh(
+    _, nmse_lists_LBFGS_RE, _ = cgh_toolbox.multi_frame_cgh(
         target_fields,
         distances,
         iteration_number=NUM_ITERATIONS,
