@@ -24,6 +24,6 @@ fig, ax = plt.subplots()
 for i in range(1, 9):
     ax.scatter(jpeg_size_scatter[i], nmse_scatter[i], label="holo bit depth = " + str(i))
 plt.xlabel("Target image jpeg compression rate (%)")
-plt.ylabel("NMSE")
+plt.ylabel("NMSE between reconstruction and target image")
 ax.legend()
 plt.show()

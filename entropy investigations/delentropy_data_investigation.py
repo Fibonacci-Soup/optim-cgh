@@ -1,6 +1,6 @@
 import csv
 import os
-import PIL.Image
+# import PIL.Image
 import matplotlib.pyplot as plt
 
 delentropy = {}
@@ -23,8 +23,8 @@ with open(os.path.join('entropy investigations', 'entropy_investigation.csv')) a
 
 fig, ax = plt.subplots()
 for i in range(1, 9):
-    ax.scatter(delentropy_scatter[i], nmse_scatter[i], label="holo bit depth = " + str(i))
-plt.xlabel("Delentropy of the target image")
-plt.ylabel("NMSE of the reconstruction to the target image")
+    ax.scatter(delentropy_scatter[i], nmse_scatter[i], label="hologram bit depth: " + str(i))
+plt.xlabel("Target image delentropy")
+plt.ylabel("NMSE between reconstruction and target image")
 ax.legend()
 plt.show()
