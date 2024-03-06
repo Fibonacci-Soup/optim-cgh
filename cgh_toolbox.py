@@ -401,8 +401,13 @@ def energy_conserve(field, scaling=DEFAULT_ENERGY_CONSERVATION_SCALING):
     """
     return field * torch.sqrt((scaling * field.size(-1) * field.size(-2)) / (field**2).sum())
 
+def quantize_to_bit_depth(phase_hologram, hologram_quantization_bit_depth):
+    int_hologram = torch.round(phase_hologram / math.pi * 2**(hologram_quantization_bit_depth-1))
+    # make -pi to pi (e.g. 1 bit binary hologram will change values from [-1, 0, 1] to [0, 1])
+    int_hologram[int_hologram == -2**(hologram_quantization_bit_depth-1)] = 2**(hologram_quantization_bit_depth-1)
+    return int_hologram / 2**(hologram_quantization_bit_depth-1) * math.pi
 
-def gerchberg_saxton_fraunhofer(target_field, iteration_number=50, manual_seed_value=0, hologram_quantization_bit_depth=None):
+def gerchberg_saxton_single_slice(target_field, iteration_number=50, manual_seed_value=0, hologram_quantization_bit_depth=None, distance=None):
     """
     Traditional Gerchberg Saxton algorithm implemented using pytorch for Fraunhofer region (far field).
 
@@ -419,9 +424,12 @@ def gerchberg_saxton_fraunhofer(target_field, iteration_number=50, manual_seed_v
     A = torch.exp(1j * ((torch.rand(target_field.size()) * 2 - 1) * math.pi).to(DATATYPE)).to(device)
     GS_NMSE_list = []
     for i in range(iteration_number):
-        E = torch.fft.fftshift(torch.fft.fft2(torch.fft.fftshift(A)))
+        if distance:
+            E = fresnel_propergation(A, distance)
+        else:
+            E = torch.fft.fftshift(torch.fft.fft2(torch.fft.fftshift(A)))
         E_norm = energy_match(E.abs(), target_field)
-        # save_image(".\\Output\\recon", E_norm.detach().cpu())
+        # save_image(".\\Output\\recon_bit_depth_{}".format(quantize_to_bit_depth), E_norm.detach().cpu())
         # GS_NMSE_list.append((torch.nn.MSELoss(reduction="mean")(E_norm, target_field)).item() / (target_field**2).sum().item())
         # GS_NMSE_list.append(torch.nn.KLDivLoss(reduction="mean")(torch.flatten(E_norm / target_field.max()).expand(1, -1), torch.flatten(target_field / target_field.max()).expand(1, -1)).item())
         nmse_i = (((E_norm - target_field)**2).mean() / (target_field**2).sum()).item()
@@ -429,17 +437,16 @@ def gerchberg_saxton_fraunhofer(target_field, iteration_number=50, manual_seed_v
 
         GS_NMSE_list.append(nmse_i)
         E = target_field * torch.exp(1j * E.angle())
-        A = torch.fft.ifftshift(torch.fft.ifft2(torch.fft.ifftshift(E)))
+        if distance:
+            A = fresnel_backward_propergation(E, distance)
+        else:
+            A = torch.fft.ifftshift(torch.fft.ifft2(torch.fft.ifftshift(E)))
         phase_hologram = A.angle()
         if hologram_quantization_bit_depth:
-            int_hologram = torch.round(phase_hologram / math.pi * 2**(hologram_quantization_bit_depth-1))
-            # make -pi to pi (e.g. 1 bit binary hologram will change values from [-1, 0, 1] to [0, 1])
-            int_hologram[int_hologram == -2**(hologram_quantization_bit_depth-1)] = 2**(hologram_quantization_bit_depth-1)
-            phase_hologram = int_hologram / 2**(hologram_quantization_bit_depth-1) * math.pi
-            # print("DEBUG: Bit depth is ", hologram_quantization_bit_depth, " quantized phase_hologram is:", phase_hologram)
+            phase_hologram = quantize_to_bit_depth(phase_hologram, hologram_quantization_bit_depth)
         A = torch.exp(1j * phase_hologram)
-    # save_image('.\\Output\\recon_bit_depth_{}'.format(hologram_quantization_bit_depth), E_norm.detach().cpu(), target_field.max().cpu())
-    # save_image('.\\Output\\hologram_bit_depth_{}'.format(hologram_quantization_bit_depth), phase_hologram.detach().cpu(), math.pi)
+    save_image('.\\Output\\recon_bit_depth_{}'.format(hologram_quantization_bit_depth), E_norm.detach().cpu(), target_field.max().cpu())
+    save_image('.\\Output\\hologram_bit_depth_{}'.format(hologram_quantization_bit_depth), phase_hologram.detach().cpu(), math.pi)
     return A, GS_NMSE_list, phase_hologram
 
 
@@ -525,7 +532,7 @@ def gerchberg_saxton_3d_sequential_slicing(target_fields, distances, iteration_n
 def optim_cgh_3d(target_fields, distances, sequential_slicing=False, wavelength=DEFAULT_WAVELENGTH, pitch_size=DEFAULT_PITCH_SIZE,
                  save_progress=False, iteration_number=20, cuda=False, learning_rate=0.1, record_all_nmse=True, optimise_algorithm="LBFGS",
                  grad_history_size=10, loss_function=torch.nn.MSELoss(reduction="sum"), energy_conserv_scaling=DEFAULT_ENERGY_CONSERVATION_SCALING, time_limit=None,
-                 initial_phase='random', smooth_holo_kernel_size=None):
+                 initial_phase='random', smooth_holo_kernel_size=None, holo_bit_depth=None):
     """
     Carry out L-BFGS optimisation of CGH for a 3D target consisted of multiple slices of 2D images at different distances.
 
@@ -594,6 +601,9 @@ def optim_cgh_3d(target_fields, distances, sequential_slicing=False, wavelength=
             # Smooth the phase hologram
             blurrerd_phase = torchvision.transforms.functional.gaussian_blur(phase, kernel_size=smooth_holo_kernel_size)
             hologram = amplitude * torch.exp(1j * blurrerd_phase)
+        elif holo_bit_depth:
+            # quantize the phase to certain bit depth
+            hologram = amplitude * torch.exp(1j * quantize_to_bit_depth(phase, holo_bit_depth))
         else:
             hologram = amplitude * torch.exp(1j * phase)
 

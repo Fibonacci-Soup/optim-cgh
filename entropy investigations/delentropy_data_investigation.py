@@ -16,9 +16,14 @@ with open(os.path.join('entropy investigations', 'delentropy_results.csv')) as c
 with open(os.path.join('entropy investigations', 'entropy_investigation.csv')) as csv_file_nmse:
     csv_file_read_nmse = csv.reader(csv_file_nmse, delimiter=',')
     next(csv_file_read_nmse)
-    for row in csv_file_read_nmse:
-        delentropy_scatter[int(row[2])].append(delentropy[row[0]])
-        nmse_scatter[int(row[2])].append(float(row[3]))
+    with open('holo_information_investigation.csv', 'w', newline='') as output_file:
+        file_writer = csv.writer(output_file)
+        file_writer.writerow(['image_filename', 'image_entropy', 'image_delentropy', 'hologram_bit_depth', 'NMSE', 'hologram_entropy'])
+        for row in csv_file_read_nmse:
+            delentropy_scatter[int(row[2])].append(delentropy[row[0]])
+            nmse_scatter[int(row[2])].append(float(row[3]))
+            file_writer.writerow([row[0], row[1], delentropy[row[0]], row[2], row[3], row[4]])
+
 
 
 fig, ax = plt.subplots()

@@ -4,11 +4,11 @@
 # Trying to reproduce: https://arxiv.org/abs/1609.01117
 
 import os
-from urllib.request import urlopen
+# from urllib.request import urlopen
 from scipy import misc,ndimage,signal
 import numpy as np
 import matplotlib.pyplot as plt
-import urllib.request, json
+# import urllib.request, json
 from PIL import Image, ImageOps
 import csv
 
