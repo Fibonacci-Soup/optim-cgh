@@ -32,13 +32,13 @@ def compute_delentropy(input_image):
     fx = ( image[:,2:] - image[:,:-2] )[1:-1,:]
     fy = ( image[2:,:] - image[:-2,:] )[:,1:-1]
 
-    im = Image.fromarray(fx)
-    im = im.convert("L")
-    im.save("fx.png")
+    # im = Image.fromarray(fx)
+    # im = im.convert("L")
+    # im.save("fx.png")
 
-    im = Image.fromarray(fy)
-    im = im.convert("L")
-    im.save("fy.png")
+    # im = Image.fromarray(fy)
+    # im = im.convert("L")
+    # im.save("fy.png")
 
     diffRange = numpy.max([numpy.abs(fx.min()), numpy.abs(fx.max()), numpy.abs(fy.min()), numpy.abs(fy.max())])
     if diffRange >= 200   and diffRange <= 255  : diffRange = 255
@@ -82,7 +82,7 @@ def main():
     with open('holo_information_investigation_GS_Fresnel0.1.csv', 'w', newline='') as output_file:
         file_writer = csv.writer(output_file)
         file_writer.writerow(['image_filename', 'image_entropy', 'image_delentropy', 'holo_bit_depth', 'NMSE', 'holo_entropy'])
-        for image_filename in image_filenames:
+        for image_filename in image_filenames[68:]:
             target_image = Image.open(os.path.join(IMAGE_DIRECTORY, image_filename))
 
 

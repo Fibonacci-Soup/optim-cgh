@@ -445,8 +445,8 @@ def gerchberg_saxton_single_slice(target_field, iteration_number=50, manual_seed
         if hologram_quantization_bit_depth:
             phase_hologram = quantize_to_bit_depth(phase_hologram, hologram_quantization_bit_depth)
         A = torch.exp(1j * phase_hologram)
-    save_image('.\\Output\\recon_bit_depth_{}'.format(hologram_quantization_bit_depth), E_norm.detach().cpu(), target_field.max().cpu())
-    save_image('.\\Output\\hologram_bit_depth_{}'.format(hologram_quantization_bit_depth), phase_hologram.detach().cpu(), math.pi)
+    # save_image('.\\Output\\recon_bit_depth_{}'.format(hologram_quantization_bit_depth), E_norm.detach().cpu(), target_field.max().cpu())
+    # save_image('.\\Output\\hologram_bit_depth_{}'.format(hologram_quantization_bit_depth), phase_hologram.detach().cpu(), math.pi)
     return A, GS_NMSE_list, phase_hologram
 
 
