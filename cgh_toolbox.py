@@ -13,6 +13,7 @@ import math
 import torch
 import torchvision
 import numpy as np
+import scipy
 
 DEFAULT_PITCH_SIZE = 13.62e-6  #0.00000425  # Default pitch size of the SLM
 DEFAULT_WAVELENGTH = 532e-9 #0.0000006607  # Default wavelength of the laser
@@ -422,8 +423,18 @@ def gerchberg_saxton_single_slice(target_field, iteration_number=50, manual_seed
     target_field = target_field.to(device)
 
     A = torch.exp(1j * ((torch.rand(target_field.size()) * 2 - 1) * math.pi).to(DATATYPE)).to(device)
+    # A = torch.exp(1j * torch.zeros(target_field.size()).to(DATATYPE)).to(device)
     GS_NMSE_list = []
+    holo_entropy_list = []
     for i in range(iteration_number):
+        phase_hologram = A.angle()
+        if hologram_quantization_bit_depth:
+            phase_hologram = quantize_to_bit_depth(phase_hologram, hologram_quantization_bit_depth)
+            # Compute entropy of the hologram
+            value, counts = np.unique(phase_hologram.cpu().numpy(), return_counts=True)
+            holo_entropy_list.append(scipy.stats.entropy(counts, base=2))
+        A = torch.exp(1j * phase_hologram)
+
         if distance:
             E = fresnel_propergation(A, distance)
         else:
@@ -441,13 +452,10 @@ def gerchberg_saxton_single_slice(target_field, iteration_number=50, manual_seed
             A = fresnel_backward_propergation(E, distance)
         else:
             A = torch.fft.ifftshift(torch.fft.ifft2(torch.fft.ifftshift(E)))
-        phase_hologram = A.angle()
-        if hologram_quantization_bit_depth:
-            phase_hologram = quantize_to_bit_depth(phase_hologram, hologram_quantization_bit_depth)
-        A = torch.exp(1j * phase_hologram)
+
     # save_image('.\\Output\\recon_bit_depth_{}'.format(hologram_quantization_bit_depth), E_norm.detach().cpu(), target_field.max().cpu())
     # save_image('.\\Output\\hologram_bit_depth_{}'.format(hologram_quantization_bit_depth), phase_hologram.detach().cpu(), math.pi)
-    return A, GS_NMSE_list, phase_hologram
+    return A, GS_NMSE_list, holo_entropy_list
 
 
 def gerchberg_saxton_fraunhofer_smooth(target_field, iteration_number=50):
