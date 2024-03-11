@@ -1,6 +1,5 @@
 import csv
 import os
-# import PIL.Image
 import matplotlib.pyplot as plt
 
 image_filenames = []
@@ -36,8 +35,6 @@ ax.legend()
 plt.show()
 
 for i in range(4, len(image_filenames), 5): # only plot for a portion of data
-    # print(image_filenames[i])
-    # for bit_depth in range(len(entropy_scatter[0])):
     plt.plot([bit_depth for bit_depth in range(1, 9)], [nmse_scatter[bit_depth][i] for bit_depth in range(1, 9)], label=image_filenames[i])
 
 plt.xlabel("Hologram bit depth")

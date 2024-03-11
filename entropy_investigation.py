@@ -35,7 +35,7 @@ def compute_delentropy(input_image):
         nBins = 1024
     dbin = 0 if image.dtype == float else 0.5
     r = diffRange + dbin
-    delDensity, xedges, yedges = numpy.histogram2d( fx.flatten(), fy.flatten(), bins = nBins, range = [ [-r,r], [-r,r] ] )
+    delDensity, xedges, yedges = numpy.histogram2d(fx.flatten(), fy.flatten(), bins = nBins, range = [ [-r,r], [-r,r] ])
     if nBins == 2*diffRange+1:
         assert( xedges[1] - xedges[0] == 1.0 )
         assert( yedges[1] - yedges[0] == 1.0 )
@@ -59,7 +59,7 @@ def main():
 
     fig, ax = plt.subplots()
     ax_twin = ax.twinx()
-    with open('holo_information_investigation_GS_Fresnel.csv', 'w', newline='') as output_file:
+    with open('holo_information_investigation_GS_Fresnel0.1.csv', 'w', newline='') as output_file:
         file_writer = csv.writer(output_file)
         file_writer.writerow(['image_filename', 'image_entropy', 'image_delentropy', 'holo_bit_depth', 'NMSE', 'holo_entropy'])
         for image_filename in image_filenames[499:500]:
@@ -67,10 +67,8 @@ def main():
 
             # Get image entropy and delentropy
             if (image_filename not in image_entropy_dict) or (image_filename not in image_delentropy_dict):
-
                 # Comput delentropy of target image
                 image_delentropy = compute_delentropy(target_image)
-
                 target_image = ImageOps.grayscale(target_image)
                 target_image = numpy.array(target_image) / 255.0
 
@@ -92,7 +90,7 @@ def main():
                     entropy_scatter[bit_depth] = []
                     delentropy_scatter[bit_depth] = []
                     nmse_scatter[bit_depth] = []
-                for manual_seed_i in range(1):
+                for manual_seed_i in range(1): # in case if multiple random runs are needed
                     target_field = torch.from_numpy(target_image)
                     target_field = target_field.expand(1, -1, -1)
                     _, nmse_list, holo_entropy_list = cgh_toolbox.gerchberg_saxton_single_slice(target_field, \
@@ -110,17 +108,15 @@ def main():
     plt.xticks([n for n in range(len(holo_entropy_list))])
     ax.set_xlabel("iteration number")
     ax.set_ylabel("Entropy of hologram (solid lines)")
+    ax.set_ylim(0, 9)
     ax_twin.set_ylabel("NMSE between reconstruction and target image (dotted lines)")
+    ax_twin.set_ylim(0, 1.5e-7)
     ax.legend(loc='upper right')
     plt.show()
 
-
-
-
-
-
     # with open('variables_entropy_investigation.pkl', 'wb') as f:  # Python 3: open(..., 'wb')
     #     pickle.dump([image_filenames, entropy_scatter, delentropy_scatter, nmse_scatter], f)
+
     # fig, ax = plt.subplots()
     # for i in entropy_scatter.keys():
     #     print(i)
