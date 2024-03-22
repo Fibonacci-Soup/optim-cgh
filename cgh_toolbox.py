@@ -45,7 +45,7 @@ def load_target_images(filenames=[os.path.join('Target_images', 'A.png')], energ
     for filename in filenames:
         target_field = read_image_to_tensor(filename)
         # The following commented-out code might be useful for resizing and zero padding the target images
-        # target_field = torch.nn.functional.interpolate(target_field.expand(1, -1, -1, -1), (1024, 1280))[0]
+        # target_field = torch.nn.functional.interpolate(target_field.expand(1, -1, -1, -1), (1080, 1920))[0]
         # target_field = zero_pad_to_size(target_field, target_height=1080, target_width=1920)
         target_field_normalised = energy_conserve(target_field, energy_conserv_scaling)
         target_fields_list.append(target_field_normalised)
@@ -145,7 +145,7 @@ def generate_donut_pattern(radius=512, line_thickness=1):
     return torch.from_numpy(np.array([donut]))
 
 
-def zero_pad_to_size(input_tensor, target_height=5120, target_width=5120):
+def zero_pad_to_size(input_tensor, target_height=5120, target_width=5120, left_shift_from_centre=0):
     """
     Zero pad a tensor to target height and width.
 
@@ -154,7 +154,7 @@ def zero_pad_to_size(input_tensor, target_height=5120, target_width=5120):
     :param target_width: target total width after zero padding (Default: 5120)
     :returns pytorch.tensor: the zero padded tensor
     """
-    zero_pad_left = int((target_width - input_tensor.shape[-1]) / 2)
+    zero_pad_left = int((target_width - input_tensor.shape[-1]) / 2) - left_shift_from_centre
     zero_pad_right = target_width - input_tensor.shape[-1] - zero_pad_left
     zero_pad_top = int((target_height - input_tensor.shape[-2]) / 2)
     zero_pad_bottom = target_height - input_tensor.shape[-2] - zero_pad_top
@@ -478,13 +478,13 @@ def gerchberg_saxton_fraunhofer_smooth(target_field, iteration_number=50):
     return A, GS_NMSE_list
 
 
-def gerchberg_saxton_3d_sequential_slicing(target_fields, distances, iteration_number=50, weighting=0.001, time_limit=None, pitch_size=DEFAULT_PITCH_SIZE, wavelength=DEFAULT_WAVELENGTH):
+def gerchberg_saxton_3d_sequential_slicing(target_fields, distances, iteration_number=50, weighting=0, zero_cap=0, time_limit=None, pitch_size=DEFAULT_PITCH_SIZE, wavelength=DEFAULT_WAVELENGTH):
     """
     Implementation of Gerchberg Saxton algorithm with sequential slicing (SS) for Fresnel region.
     It propagates the hologarm to a single slice at each iteration, sequentially looping through all slices.
 
-    :param target_fields: tensor for target images
-    :param distances: images distances
+    :param target_fields: tensor for target images (e.g. loaded by load_target_images)
+    :param distances: images distances in meters (e.g. [1, 2, 3])
     :param iteration_number: number of iterations (Default: 50)
     :param weighting: weighting of current amplitude when applying the target amplitude constraint (Default: 0.001)
         (this is an implementation of DCGS: https://doi.org/10.1364/OE.27.008958)
@@ -527,10 +527,15 @@ def gerchberg_saxton_3d_sequential_slicing(target_fields, distances, iteration_n
 
         slice_number = i % len(target_fields)
         E = fresnel_propergation(A, distances[slice_number], pitch_size=pitch_size, wavelength=wavelength)
-        if weighting == 0:
-            E = target_fields[slice_number] * torch.exp(1j * E.angle())
-        else:
+        if weighting != 0:
             E = (E.abs() * weighting + target_fields[slice_number] * (1-weighting)) * torch.exp(1j * E.angle())
+        elif zero_cap != 0:
+            E_abs = E.abs()
+            E_zeros = E_abs * (target_fields[slice_number].max() - target_fields[slice_number])
+            E_zeros[E_zeros > zero_cap] = zero_cap
+            E = (E_zeros + target_fields[slice_number]) * torch.exp(1j * E.angle())
+        else:
+            E = target_fields[slice_number] * torch.exp(1j * E.angle())
         A = fresnel_backward_propergation(E, distances[slice_number], pitch_size=pitch_size, wavelength=wavelength)
         A = torch.exp(1j * A.angle())
 
