@@ -45,7 +45,7 @@ def load_target_images(filenames=[os.path.join('Target_images', 'A.png')], energ
     for filename in filenames:
         target_field = read_image_to_tensor(filename)
         # The following commented-out code might be useful for resizing and zero padding the target images
-        # target_field = torch.nn.functional.interpolate(target_field.expand(1, -1, -1, -1), (1080, 1920))[0]
+        target_field = torch.nn.functional.interpolate(target_field.expand(1, -1, -1, -1), (1024, 1280))[0]
         # target_field = zero_pad_to_size(target_field, target_height=1080, target_width=1920)
         target_field_normalised = energy_conserve(target_field, energy_conserv_scaling)
         target_fields_list.append(target_field_normalised)
@@ -273,7 +273,7 @@ def fresnel_propergation(hologram, distance=2, pitch_size=DEFAULT_PITCH_SIZE, wa
             u2=fftshift(fft2(U2));
         end
 
-    :param torch.tensor hologram: input tensor representing the hologram
+    :param torch.tensor hologram: input tensor representing the hologram in complex form
     :param distance: distance of Fresnel propergation in meters (Default: 2)
     :param pitch_size: pitch size of the spatial light modulator (SLM) which displays the hologram (Default: DEFAULT_PITCH_SIZE)
     :param wavelength: wavelength of the light source (Default: DEFAULT_WAVELENGTH)
@@ -328,21 +328,25 @@ def fresnel_backward_propergation(field, distance=2, pitch_size=DEFAULT_PITCH_SI
     return u1
 
 
-def generate_quadratic_phase(size=[1024, 1024], scaling=0.00002):
+def generate_quadratic_phase(size=[1280, 1024], scaling=None):
     """
     Generate an initial phase hologram having a quadratic pattern starting from the center.
 
-    :param size: the dimension of the hologram (Default: [1024, 1024])
-    :param scaling: a scaling to control the gradient of the quadratic increase (Default: 0.00002)
+    :param size: the dimension of the hologram (Default: [1280, 1024])
+    :param scaling: a tuple scaling to control the rate of the quadratic increase in two directions (e.g. [0.002, 0.0018]) (Default: None)
     """
-    holo_height = size[0]
-    holo_width = size[1]
+    holo_height = size[1]
+    holo_width = size[0]
 
     x_lin = torch.linspace(-(holo_width - 1) / 2, (holo_width - 1) / 2, holo_width)
     y_lin = torch.linspace(-(holo_height - 1) / 2, (holo_height - 1) / 2, holo_height)
     y_meters, x_meters = torch.meshgrid(y_lin, x_lin, indexing='ij')
 
-    h = (x_meters**2 + y_meters**2) * scaling
+    if scaling:
+        h = scaling[0] * x_meters**2 + scaling[1] * y_meters**2
+    else:
+        # Given in https://doi.org/10.1364/OE.422115
+        h = math.pi/2/size[0] * x_meters**2 + math.pi/2/size[1] * y_meters**2
     return h
 
 
@@ -501,7 +505,6 @@ def gerchberg_saxton_3d_sequential_slicing(target_fields, distances, iteration_n
 
     amplitude = torch.ones(target_fields[0].size(), requires_grad=False).to(DATATYPE).to(device)
     phase = ((torch.rand(target_fields[0].size()) * 2 - 1) * math.pi).to(DATATYPE).to(device)
-    # phase = (torch.ones(target_fields[0].size()) * generate_quadratic_phase([target_fields[0].shape[-2], target_fields[0].shape[-1]], 0.00001)).to(DATATYPE).detach().to(device)
     A = amplitude * torch.exp(1j * phase)
 
     nmse_lists = []
@@ -550,7 +553,7 @@ def optim_cgh_3d(target_fields, distances, sequential_slicing=False, wavelength=
     Carry out L-BFGS optimisation of CGH for a 3D target consisted of multiple slices of 2D images at different distances.
 
     :param target_fields: tensor for target images
-    :param distances: image distances
+    :param distances: a list of image distances (e.g. [1.1 2.3 3.1 4.3]), whose length matches the number of target images.
     :param sequential_slicing: switch to enable/disable sequential slicing (Default: False)
         If sequential_slicing is True, Loss is calculated summing reconstructions at all distances.
         If sequential_slicing is False, Loss is calculated for reconstruction at each distance in turn for each iteration.
@@ -588,8 +591,8 @@ def optim_cgh_3d(target_fields, distances, sequential_slicing=False, wavelength=
         phase = (torch.ones(target_fields[0].size()) * generate_linear_phase([target_fields[0].shape[-2], target_fields[0].shape[-1]], 0.5)).to(DATATYPE).detach().to(device).requires_grad_()
     elif initial_phase.lower() in ['quadratic', 'quad']:
         # linear initial phase
-        phase = (torch.ones(target_fields[0].size()) * generate_quadratic_phase([target_fields[0].shape[-2],
-                 target_fields[0].shape[-1]], 0.00002)).to(DATATYPE).detach().to(device).requires_grad_()
+        phase = (torch.ones(target_fields[0].size()) * generate_quadratic_phase([target_fields[0].shape[-1],
+                 target_fields[0].shape[-2]])).to(DATATYPE).detach().to(device).requires_grad_()
     else:
         raise ValueError("The required initial phase is not recognised!")
 
@@ -672,55 +675,60 @@ def freeman_projector_encoding(holograms, alg_name='MultiFrame', filename_note='
     """
     (Experiment in progress. Code for my ongoing project: Multi Fram Phase-Only Hologram Optimisation)
     """
-    binary_hologram = torch.round(holograms.detach().cpu().angle() / math.pi)
+    binary_phase_holograms = torch.round(holograms.detach().cpu().angle() / math.pi)
+    # print(binary_phase_holograms.max(), binary_phase_holograms.min(), binary_phase_holograms.mean())
+    reconstruction_abs = fresnel_propergation(torch.exp(1j * binary_phase_holograms * math.pi), distance=999).abs()
+    reconstruction_mean = energy_conserve(reconstruction_abs.mean(dim=0))
+    save_image(os.path.join('Output', 'MultiFrame', '{}_binaryholo_recon_mean_test'.format('MultiFrame')), reconstruction_mean.detach().cpu())
+
     freeman_hologram = torch.zeros(3, holograms.size(-2), holograms.size(-1))
+    # Freeman projector takes image of 3 channel * 8 bit depth, totaling 24 bit planes
     for channel_i in range(3):
         channel_temp_sum = torch.zeros(1, holograms.size(-2), holograms.size(-1))
         for subframe_i in range(8):
             current_frame_i = (channel_i * 8 + subframe_i) % holograms.size(0)
-            channel_temp_sum += binary_hologram[current_frame_i] * 2**subframe_i
+            channel_temp_sum += binary_phase_holograms[current_frame_i] * 2**subframe_i
         freeman_hologram[channel_i] = channel_temp_sum.detach()
 
     save_image(os.path.join('Output', alg_name, '{}_freeman_holo{}'.format(alg_name, filename_note)), freeman_hologram)
     return
 
 
-def save_multi_frame_holograms_and_their_recons(holograms, distances, reconstructions=None, recon_dynamic_range=None, alg_name='MultiFrame', filename_note=''):
+def save_multi_frame_holograms_and_their_recons(holograms, distance=None, reconstruction_subframes=None, recon_dynamic_range=None, alg_name='MultiFrame', filename_note='', pitch_size=DEFAULT_PITCH_SIZE, wavelength=DEFAULT_WAVELENGTH):
     """
-    (Experiment in progress. Code for my ongoing project: Multi Fram Phase-Only Hologram Optimisation)
+    (Experiment in progress. Code for my ongoing project: Multi Frame Phase-Only Hologram Optimisation)
     """
     if not os.path.isdir(os.path.join('Output', '{}'.format(alg_name))):
         os.makedirs(os.path.join('Output', '{}'.format(alg_name)))
-    freeman_projector_encoding(holograms, filename_note = str(distances[0]))
+    freeman_projector_encoding(holograms, filename_note = filename_note)
 
-    if reconstructions is None:
-        print("Warning: Reconstructions not given, doing far field computations from holograms")
+    if reconstruction_subframes is None:
         for hologram_i, hologram in enumerate(holograms):
             # print("phase mean: ", hologram.angle().mean().item(), "max: ", hologram.angle().max().item(), "min: ", hologram.angle().min().item())
             phase_hologram = hologram.detach().cpu().angle() % (2*math.pi) / (2*math.pi) * 255.0
             # print("encoded holo mean: ", phase_hologram.mean().item(), "max: ", phase_hologram.max().item(), "min: ", phase_hologram.min().item())
-            save_image(os.path.join('Output', alg_name, '{}_holo{}{}'.format(alg_name, hologram_i, filename_note)), phase_hologram, 255.0)
+            save_image(os.path.join('Output', alg_name, '{}_holo{}_d{}{}'.format(alg_name, hologram_i, distance, filename_note)), phase_hologram, 255.0)
 
             # gamma_corrected_phase_hologram = hologram_encoding_gamma_correct_linear(phase_hologram)
             # print("Sony holo mean: ", gamma_corrected_phase_hologram.mean().item(), "max: ", gamma_corrected_phase_hologram.max().item(), "min: ", gamma_corrected_phase_hologram.min().item())
             # save_image('.\Output\{0}\{0}_sony_holo{1}'.format(alg_name, filename_note), gamma_corrected_phase_hologram, 255.0)
-            reconstruction_abs = fraunhofer_propergation(hologram).abs()
+            reconstruction_abs = fresnel_propergation(holograms, distance=distance, pitch_size=pitch_size, wavelength=wavelength).abs()
             reconstruction_normalised = energy_conserve(reconstruction_abs)
-            save_image(os.path.join('Output', alg_name, '{}_recon{}{}'.format(alg_name, hologram_i, filename_note)), reconstruction_normalised.detach().cpu(), recon_dynamic_range)
+            save_image(os.path.join('Output', alg_name, '{}_recon{}_d{}{}'.format(alg_name, hologram_i, distance, filename_note)), reconstruction_normalised.detach().cpu(), recon_dynamic_range)
     else:
         for hologram_i, hologram in enumerate(holograms):
             phase_hologram = hologram.detach().cpu().angle() % (math.pi) / (math.pi) * 255.0
-            save_image(os.path.join('Output', alg_name, '{}_holo{}{}'.format(alg_name, hologram_i, filename_note)), phase_hologram, 255.0)
+            save_image(os.path.join('Output', alg_name, '{}_holo{}_d{}{}'.format(alg_name, hologram_i, distance, filename_note)), phase_hologram, 255.0)
 
-        for reconstruction_i, reconstruction in enumerate(reconstructions):
+        for reconstruction_i, reconstruction in enumerate(reconstruction_subframes):
             reconstruction_normalised = energy_conserve(reconstruction)
-            save_image(os.path.join('Output', alg_name, '{}_recon{}{}'.format(alg_name, reconstruction_i, filename_note)), reconstruction_normalised.detach().cpu(), recon_dynamic_range)
+            save_image(os.path.join('Output', alg_name, '{}_recon{}_d{}{}'.format(alg_name, reconstruction_i, distance, filename_note)), reconstruction_normalised.detach().cpu(), recon_dynamic_range)
 
 
 def multi_frame_cgh(target_fields, distances, wavelength=DEFAULT_WAVELENGTH, pitch_size=DEFAULT_PITCH_SIZE,
-                    iteration_number=20, cuda=False, learning_rate=0.1, save_progress=True, optimise_algorithm="LBFGS",
-                    grad_history_size=10, loss_function=torch.nn.MSELoss(reduction="sum"), energy_conserv_scaling=DEFAULT_ENERGY_CONSERVATION_SCALING, time_limit=None,
-                    num_frames=8):
+                    iteration_number=20, cuda=False, learning_rate=0.1, optimise_algorithm="LBFGS",
+                    grad_history_size=10, loss_function=torch.nn.MSELoss(reduction="sum"),
+                    energy_conserv_scaling=DEFAULT_ENERGY_CONSERVATION_SCALING, time_limit=None, num_frames=8):
     """
     (Experiment in progress. Code for my ongoing project: Multi Fram Phase-Only Hologram Optimisation)
     """
@@ -733,8 +741,10 @@ def multi_frame_cgh(target_fields, distances, wavelength=DEFAULT_WAVELENGTH, pit
     # Fixed unit amplitude
     amplitude = torch.ones(target_fields[0].size(), requires_grad=False).to(DATATYPE).to(device)
 
-    # Multi-frame phases
+    # Initial multi-frame phases
     phases = ((torch.rand([num_frames] + list(target_fields[0].size())) * 2 - 1) * math.pi).to(DATATYPE).detach().to(device).requires_grad_()
+    # phases = torch.stack([fresnel_backward_propergation(target_fields[0] * torch.exp(1j*generate_quadratic_phase(target_fields[0].size())).to(DATATYPE).detach().to(device), distance=distances[0], pitch_size=pitch_size, wavelength=wavelength).angle() for i in range(num_frames)]).to(DATATYPE).detach().to(device).requires_grad_()
+    # phases = fresnel_backward_propergation(target_fields[0] * torch.exp(1j * torch.rand([num_frames] + list(target_fields[0].size()))).to(device), distance=distances[0], pitch_size=pitch_size, wavelength=wavelength).angle().to(DATATYPE).detach().requires_grad_()
 
     # Decide optimisation algorithm
     if optimise_algorithm.lower() in ["lbfgs", "l-bfgs"]:
@@ -751,42 +761,45 @@ def multi_frame_cgh(target_fields, distances, wavelength=DEFAULT_WAVELENGTH, pit
     nmse_lists.append([])
 
     for i in range(iteration_number):
-        print(i)
+        print('iteration {} out of {}'.format(i, iteration_number))
         optimiser.zero_grad()
-        if i > iteration_number * 3 / 4:
-            holograms = amplitude * torch.exp(1j * torch.nn.Sigmoid()(4 * phases / math.pi) * math.pi)
-        elif i > iteration_number / 2:
-            holograms = amplitude * torch.exp(1j * torch.nn.Sigmoid()(2 * phases / math.pi) * math.pi)
-        elif i > iteration_number / 4:
-            holograms = amplitude * torch.exp(1j * torch.nn.Sigmoid()(1.5 * phases / math.pi) * math.pi)
+
+        # if i > iteration_number * 3 / 4:
+        #     holograms = amplitude * torch.exp(1j * torch.nn.Sigmoid()(8 * phases) * math.pi)
+        # elif i > iteration_number / 2:
+        #     holograms = amplitude * torch.exp(1j * torch.nn.Sigmoid()(4 * phases) * math.pi)
+        # elif i > iteration_number / 4:
+        #     holograms = amplitude * torch.exp(1j * torch.nn.Sigmoid()(2 * phases) * math.pi)
+        # else:
+        #     holograms = amplitude * torch.exp(1j * phases)
+
+        if i > iteration_number / 4:
+            holograms = amplitude * torch.exp(1j * torch.nn.Sigmoid()(phases / math.pi) * math.pi)
         else:
             holograms = amplitude * torch.exp(1j * phases)
-
 
         # Propagate hologram for all distances
         reconstructions_list = []
         for index, distance in enumerate(distances):
-            reconstruction_multi_frame = fresnel_propergation(holograms, distance=distance, pitch_size=pitch_size, wavelength=wavelength).abs()
-            reconstruction_multi_frame = reconstruction_multi_frame.mean(dim=0)
-            reconstructions_list.append(energy_conserve(reconstruction_multi_frame, energy_conserv_scaling))
+            reconstruction_sub_frames = fresnel_propergation(holograms, distance=distance, pitch_size=pitch_size, wavelength=wavelength).abs()
+            reconstruction_mean = energy_conserve(reconstruction_sub_frames.mean(dim=0), energy_conserv_scaling)
+            if i == iteration_number - 1: # save final results at the last iteration
+                save_multi_frame_holograms_and_their_recons(holograms, distance=distance, reconstruction_subframes=reconstruction_sub_frames, recon_dynamic_range=target_fields.detach().cpu().max(), alg_name='MultiFrame', filename_note='_{}frames'.format(num_frames))
+                save_image(os.path.join('Output', 'MultiFrame', '{}_recon_mean_d{}_{}frames'.format('MultiFrame', distance, num_frames)), reconstruction_mean.detach().cpu(), target_fields.detach().cpu().max())
+            reconstructions_list.append(reconstruction_mean)
         reconstructions = torch.stack(reconstructions_list)
-
-        if save_progress or (i == iteration_number - 1):
-            save_multi_frame_holograms_and_their_recons(holograms, distances, reconstructions, recon_dynamic_range=target_fields.detach().cpu().max(), alg_name='MultiFrame')
 
         # Calculate loss for all slices (stacked in reconstructions)
         loss = loss_function(torch.flatten(reconstructions / target_fields.max()).expand(1, -1),
                              torch.flatten(target_fields / target_fields.max()).expand(1, -1))
 
         loss.backward(retain_graph=True)
-        # Record NMSE
-        if save_progress or (i == iteration_number - 1):
-            reconstructions = fraunhofer_propergation(holograms).abs()
-            reconstructions = reconstructions.mean(dim=0)
-            reconstructions = energy_conserve(reconstructions, energy_conserv_scaling)
-            nmse_value = (torch.nn.MSELoss(reduction="mean")(reconstructions, target_fields[0])).item() / (target_fields[0]**2).sum()
-            nmse_lists[0].append(nmse_value.data.tolist())
 
+        # Record NMSE for quality analysis
+        nmse_value = (torch.nn.MSELoss(reduction="mean")(reconstructions, target_fields)).item() / (target_fields**2).sum()
+        nmse_lists[0].append(nmse_value.data.tolist())
+
+        # Record the time stamp at each iteration for timing analysis
         time_list.append(time.time() - time_start)
         if time_limit:
             if time_list[-1] >= time_limit:
