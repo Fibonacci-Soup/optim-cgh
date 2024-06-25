@@ -28,8 +28,8 @@ def main():
     PLOT_EACH_SLICE = False
 
     # 1.A Option1: Load target images from files (please use PNG format with zero compression, even although PNG compression is lossless)
-    # images = [os.path.join('Target_images', x) for x in ['A.png', 'B.png', 'C.png', 'D.png']]
-    # target_fields = cgh_toolbox.load_target_images(images, energy_conserv_scaling=ENERGY_CONSERVATION_SCALING)
+    images = [os.path.join('Target_images', x) for x in ['A.png', 'B.png', 'C.png', 'D.png']]
+    target_fields = cgh_toolbox.load_target_images(images, energy_conserv_scaling=ENERGY_CONSERVATION_SCALING)
 
 
     # 1.B Option2: Generate target fields of specific patterns (e.g. grid pattern here)
@@ -42,7 +42,7 @@ def main():
     # square_pattern = cgh_toolbox.energy_conserve(cgh_toolbox.generate_grid_pattern(vertical_size=256, horizontal_size=256, vertical_spacing=256, horizontal_spacing=256, line_thickness=1))
     # square_pattern = cgh_toolbox.zero_pad_to_size(square_pattern, target_height=512, target_width=512)
     # square_pattern = cgh_toolbox.add_up_side_down_replica_below(square_pattern)
-    # square_pattern = cgh_toolbox.zero_pad_to_size(square_pattern, target_height=1080, target_width=1920, left_shift_from_centre=500)
+    # square_pattern = cgh_toolbox.zero_pad_to_size(square_pattern, target_height=1080, target_width=1920)
     # square_pattern = torch.nn.functional.interpolate(square_pattern.expand(1, -1, -1, -1), (1080, 1920))[0]
     # target_fields_list.append(square_pattern)
 
@@ -50,21 +50,24 @@ def main():
     # square_dot_pattern = cgh_toolbox.zero_pad_to_size(square_dot_pattern, target_height=1080, target_width=1920)
     # target_fields_list.append(square_dot_pattern)
 
-    donut_pattern = cgh_toolbox.energy_conserve(cgh_toolbox.generate_donut_pattern(radius=128, line_thickness=1))
+    # donut_pattern = cgh_toolbox.energy_conserve(cgh_toolbox.generate_donut_pattern(radius=128, line_thickness=1))
     # donut_pattern = cgh_toolbox.zero_pad_to_size(donut_pattern, target_height=512, target_width=512)
     # donut_pattern = cgh_toolbox.add_up_side_down_replica_below(donut_pattern)
-    donut_pattern = cgh_toolbox.zero_pad_to_size(donut_pattern, target_height=1080, target_width=1920, left_shift_from_centre=500)
+    # donut_pattern = cgh_toolbox.zero_pad_to_size(donut_pattern, target_height=1080, target_width=1920)
     # donut_pattern = torch.nn.functional.interpolate(donut_pattern.expand(1, -1, -1, -1), (1080, 1920))[0]
 
 
     # target_fields_list.append(square_pattern)
-    target_fields_list.append(donut_pattern)
+    # target_fields_list.append(donut_pattern)
     # target_fields_list = [cgh_toolbox.zero_pad_to_size(donut_pattern, target_height=1080, target_width=1920, left_shift_from_centre=shift_x) for shift_x in range(0, 200, 20)]
 
     # for radius in [16 + 16*x for x in range(8)]:
         # target_fields_list.append(cgh_toolbox.energy_conserve(cgh_toolbox.zero_pad_to_size(cgh_toolbox.generate_circle_pattern(radius=radius), target_height=1024, target_width=1024)))
 
-    target_fields = torch.stack(target_fields_list)
+    # target_fields = torch.stack(target_fields_list)
+
+
+
 
     # 2. Set distances according to each slice of the target (in meters)
     distances = [-0.05 - i*1 for i in range(len(target_fields))]
