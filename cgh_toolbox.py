@@ -46,7 +46,7 @@ def load_target_images(filenames=[os.path.join('Target_images', 'A.png')], energ
         target_field = read_image_to_tensor(filename)
         # The following commented-out code might be useful for resizing and zero padding the target images
         target_field = torch.nn.functional.interpolate(target_field.expand(1, -1, -1, -1), (1024, 1280))[0]
-        # target_field = zero_pad_to_size(target_field, target_height=1080, target_width=1920)
+        # target_field = zero_pad_to_size(target_field, target_height=1024, target_width=1024, shift_downwards=256)
         target_field_normalised = energy_conserve(target_field, energy_conserv_scaling)
         target_fields_list.append(target_field_normalised)
     target_fields = torch.stack(target_fields_list)
@@ -145,7 +145,7 @@ def generate_donut_pattern(radius=512, line_thickness=1):
     return torch.from_numpy(np.array([donut]))
 
 
-def zero_pad_to_size(input_tensor, target_height=5120, target_width=5120, left_shift_from_centre=0):
+def zero_pad_to_size(input_tensor, target_height=5120, target_width=5120, shift_downwards=0):
     """
     Zero pad a tensor to target height and width.
 
@@ -154,9 +154,9 @@ def zero_pad_to_size(input_tensor, target_height=5120, target_width=5120, left_s
     :param target_width: target total width after zero padding (Default: 5120)
     :returns pytorch.tensor: the zero padded tensor
     """
-    zero_pad_left = int((target_width - input_tensor.shape[-1]) / 2) - left_shift_from_centre
+    zero_pad_left = int((target_width - input_tensor.shape[-1]) / 2)
     zero_pad_right = target_width - input_tensor.shape[-1] - zero_pad_left
-    zero_pad_top = int((target_height - input_tensor.shape[-2]) / 2)
+    zero_pad_top = int((target_height - input_tensor.shape[-2]) / 2) + shift_downwards
     zero_pad_bottom = target_height - input_tensor.shape[-2] - zero_pad_top
     padded_image = torch.nn.ZeroPad2d((zero_pad_left, zero_pad_right, zero_pad_top, zero_pad_bottom))(input_tensor)
     return padded_image.to(DATATYPE)
@@ -757,36 +757,29 @@ def multi_frame_cgh(target_fields, distances, wavelength=DEFAULT_WAVELENGTH, pit
         raise NameError("Optimiser is not recognised!")
 
     time_list = []
-    nmse_lists = []
-    nmse_lists.append([])
+    nmse_list = []
 
     for i in range(iteration_number):
         print('iteration {} out of {}'.format(i, iteration_number))
         optimiser.zero_grad()
 
-        # if i > iteration_number * 3 / 4:
-        #     holograms = amplitude * torch.exp(1j * torch.nn.Sigmoid()(8 * phases) * math.pi)
-        # elif i > iteration_number / 2:
-        #     holograms = amplitude * torch.exp(1j * torch.nn.Sigmoid()(4 * phases) * math.pi)
-        # elif i > iteration_number / 4:
-        #     holograms = amplitude * torch.exp(1j * torch.nn.Sigmoid()(2 * phases) * math.pi)
-        # else:
+        # Apply phase quantization (you can uncomment the below if statements to make the quantization kick in later)
+        # if i < iteration_number / 4:
         #     holograms = amplitude * torch.exp(1j * phases)
-
-        if i > iteration_number / 4:
-            holograms = amplitude * torch.exp(1j * torch.nn.Sigmoid()(phases / math.pi) * math.pi)
-        else:
-            holograms = amplitude * torch.exp(1j * phases)
+        # else:
+            # holograms = amplitude * torch.exp(1j * torch.nn.Sigmoid()(phases / math.pi) * math.pi)
+        holograms = amplitude * torch.exp(1j * torch.nn.Sigmoid()(phases / math.pi) * math.pi)
 
         # Propagate hologram for all distances
         reconstructions_list = []
         for index, distance in enumerate(distances):
-            reconstruction_sub_frames = fresnel_propergation(holograms, distance=distance, pitch_size=pitch_size, wavelength=wavelength).abs()
-            reconstruction_mean = energy_conserve(reconstruction_sub_frames.mean(dim=0), energy_conserv_scaling)
-            if i == iteration_number - 1: # save final results at the last iteration
-                save_multi_frame_holograms_and_their_recons(holograms, distance=distance, reconstruction_subframes=reconstruction_sub_frames, recon_dynamic_range=target_fields.detach().cpu().max(), alg_name='MultiFrame', filename_note='_{}frames'.format(num_frames))
-                save_image(os.path.join('Output', 'MultiFrame', '{}_recon_mean_d{}_{}frames'.format('MultiFrame', distance, num_frames)), reconstruction_mean.detach().cpu(), target_fields.detach().cpu().max())
-            reconstructions_list.append(reconstruction_mean)
+            reconstructions = fresnel_propergation(holograms, distance=distance, pitch_size=pitch_size, wavelength=wavelength).abs() # propagate for each sub frame
+            if i == iteration_number - 1: # save final subframes and subreconstructions at the last iteration
+                save_multi_frame_holograms_and_their_recons(holograms, distance=distance, reconstruction_subframes=reconstructions, recon_dynamic_range=target_fields.detach().cpu().max(), alg_name='MultiFrame', filename_note='_{}frames'.format(num_frames))
+            reconstructions = energy_conserve(reconstructions.mean(dim=0), energy_conserv_scaling) # take the average among all sub frames
+            if i == iteration_number - 1: # save final average reconstructions at the last iteration
+                save_image(os.path.join('Output', 'MultiFrame', '{}_recon_mean_d{}_{}frames'.format('MultiFrame', distance, num_frames)), reconstructions.detach().cpu(), target_fields.detach().cpu().max())
+            reconstructions_list.append(reconstructions)
         reconstructions = torch.stack(reconstructions_list)
 
         # Calculate loss for all slices (stacked in reconstructions)
@@ -796,8 +789,12 @@ def multi_frame_cgh(target_fields, distances, wavelength=DEFAULT_WAVELENGTH, pit
         loss.backward(retain_graph=True)
 
         # Record NMSE for quality analysis
-        nmse_value = (torch.nn.MSELoss(reduction="mean")(reconstructions, target_fields)).item() / (target_fields**2).sum()
-        nmse_lists[0].append(nmse_value.data.tolist())
+        nmse_value = (torch.nn.MSELoss(reduction="mean")(reconstructions, target_fields)).item() / (target_fields**2).sum().data.item()
+        nmse_list.append(nmse_value)
+        # print(i, nmse_value)
+        # psnr_value = 20 * torch.log10(target_fields.max() / torch.sqrt(torch.nn.MSELoss(reduction="mean")(reconstructions, target_fields))).item()
+        # print(i, psnr_value)
+        # nmse_list.append(psnr_value)
 
         # Record the time stamp at each iteration for timing analysis
         time_list.append(time.time() - time_start)
@@ -811,4 +808,4 @@ def multi_frame_cgh(target_fields, distances, wavelength=DEFAULT_WAVELENGTH, pit
 
     torch.no_grad()
     holograms = amplitude * torch.exp(1j * phases)
-    return holograms.detach().cpu(), nmse_lists, time_list
+    return holograms.detach().cpu(), nmse_list, time_list
