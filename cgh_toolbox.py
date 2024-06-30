@@ -809,3 +809,75 @@ def multi_frame_cgh(target_fields, distances, wavelength=DEFAULT_WAVELENGTH, pit
     torch.no_grad()
     holograms = amplitude * torch.exp(1j * phases)
     return holograms.detach().cpu(), nmse_list, time_list
+
+
+def tipo(target_fields, distances, wavelength=DEFAULT_WAVELENGTH, pitch_size=DEFAULT_PITCH_SIZE,
+                 iteration_number=20, cuda=False, learning_rate=0.1, optimise_algorithm="LBFGS",
+                 grad_history_size=10, loss_function=torch.nn.MSELoss(reduction="sum"),
+                 energy_conserv_scaling=DEFAULT_ENERGY_CONSERVATION_SCALING, time_limit=None,
+                 initial_phase='random'):
+    time_start = time.time()
+    torch.cuda.empty_cache()
+    torch.manual_seed(0)
+    device = torch.device("cuda" if cuda else "cpu")
+    target_fields = target_fields.to(device)
+
+    # Variable phase
+    if initial_phase.lower() in ['random', 'rand']:
+        # Random initial phase within [-pi, pi]
+        phase = ((torch.rand(target_fields[0].size()) * 2 - 1) * math.pi).to(DATATYPE).detach().to(device).requires_grad_()
+    elif initial_phase.lower() in ['linear', 'lin']:
+        # linear initial phase
+        phase = (torch.ones(target_fields[0].size()) * generate_linear_phase([target_fields[0].shape[-2], target_fields[0].shape[-1]], 0.5)).to(DATATYPE).detach().to(device).requires_grad_()
+    elif initial_phase.lower() in ['quadratic', 'quad']:
+        # linear initial phase
+        phase = (torch.ones(target_fields[0].size()) * generate_quadratic_phase([target_fields[0].shape[-1],
+                 target_fields[0].shape[-2]])).to(DATATYPE).detach().to(device).requires_grad_()
+    else:
+        raise ValueError("The required initial phase is not recognised!")
+
+    # Decide optimisation algorithm
+    if optimise_algorithm.lower() in ["lbfgs", "l-bfgs"]:
+        optimiser = torch.optim.LBFGS([phase], lr=learning_rate, history_size=grad_history_size)
+    elif optimise_algorithm.lower() in ["sgd", "gd"]:
+        optimiser = torch.optim.SGD([phase], lr=learning_rate)
+    elif optimise_algorithm.lower() == "adam":
+        optimiser = torch.optim.Adam([phase], lr=learning_rate)
+    else:
+        raise ValueError("Optimiser is not recognised!")
+
+    time_list = []
+    nmse_lists = []
+    for distance in distances:
+        nmse_lists.append([])
+
+    for i in range(iteration_number):
+        optimiser.zero_grad()
+        target_complex_field = target_fields * torch.exp(1j * phase)
+
+        holograms = fresnel_backward_propergation(target_complex_field, distance=distances[0], pitch_size=pitch_size, wavelength=wavelength)
+        phase_holograms = holograms.angle()
+        save_image(os.path.join('Output', 'TIPO', 'TIPO_holo{}_d{}'.format(i, distance)), phase_holograms[0].detach().cpu())
+        reconstructions = energy_conserve(fresnel_propergation(torch.exp(1j * phase_holograms), distance=distances[0], pitch_size=pitch_size, wavelength=wavelength).abs())
+        if not os.path.isdir(os.path.join('Output', 'TIPO')):
+            os.makedirs(os.path.join('Output', 'TIPO'))
+        save_image(os.path.join('Output', 'TIPO', 'TIPO_recon{}_d{}'.format(i, distance)), reconstructions[0].detach().cpu())
+        loss = loss_function(torch.flatten(reconstructions / target_fields.max()).expand(1, -1),
+                             torch.flatten(target_fields / target_fields.max()).expand(1, -1))#loss_function(hologram.abs(), torch.ones(size=hologram.size()).to(device)*hologram.abs().mean())
+
+        print(loss.item())
+
+        loss.backward(retain_graph=True)
+
+        time_list.append(time.time() - time_start)
+        if time_limit:
+            if time_list[-1] >= time_limit:
+                break
+
+        def closure():
+            return loss
+        optimiser.step(closure)
+
+    torch.no_grad()
+
+    return holograms.detach().cpu(), nmse_lists, time_list
