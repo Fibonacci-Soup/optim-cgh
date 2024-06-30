@@ -17,8 +17,8 @@ import numpy as np
 import cgh_toolbox
 
 # Experimental setup - device properties
-PITCH_SIZE = 4.5e-6 #0.00000425  # Pitch size of the SLM
-WAVELENGTH = 405e-9 #0.0000006607  # Wavelength of the laser
+PITCH_SIZE = 0.0000136  # Pitch size of the SLM
+WAVELENGTH = 0.000000532  # Wavelength of the laser
 ENERGY_CONSERVATION_SCALING = 1.0  # Scaling factor when conserving the energy of images across different slices
 
 
@@ -28,12 +28,13 @@ def main():
     PLOT_EACH_SLICE = False
 
     # 1.A Option1: Load target images from files (please use PNG format with zero compression, even although PNG compression is lossless)
-    images = [os.path.join('Target_images', x) for x in ['A.png', 'B.png', 'C.png', 'D.png']]
+    # images = [os.path.join('Target_images', x) for x in ['A.png', 'B.png', 'C.png', 'D.png']]
+    images = [os.path.join('Target_images', x) for x in ['512_A.png', '512_B.png', '512_C.png', '512_D.png']]
     target_fields = cgh_toolbox.load_target_images(images, energy_conserv_scaling=ENERGY_CONSERVATION_SCALING)
 
 
     # 1.B Option2: Generate target fields of specific patterns (e.g. grid pattern here)
-    target_fields_list = []
+    # target_fields_list = []
     # for spacing in range(10, 41, 10):
     #     target_pattern = cgh_toolbox.generate_grid_pattern(vertical_size=1024, horizontal_size=1024, vertical_spacing=spacing, horizontal_spacing=spacing)
     #     target_fields_list.append(target_pattern)
@@ -70,8 +71,7 @@ def main():
 
 
     # 2. Set distances according to each slice of the target (in meters)
-    distances = [-0.05 - i*1 for i in range(len(target_fields))]
-    # distances = [8, 4]
+    distances = [0.01 + i*0.01 for i in range(len(target_fields))]
 
     # 3. Check for mismatch between numbers of distances and images given
     if len(distances) != len(target_fields):
@@ -84,7 +84,7 @@ def main():
     for i, target_field in enumerate(target_fields):
         cgh_toolbox.save_image(os.path.join('Output', 'Target_field_{}'.format(i)), target_field)
 
-    """
+
     # 5. Carry out GS with SS
     time_start = time.time()
     hologram, nmse_lists_GS, time_list_GS = cgh_toolbox.gerchberg_saxton_3d_sequential_slicing(
@@ -145,7 +145,7 @@ def main():
         plt.legend()
         plt.show()
     print(to_print)
-    """
+
 
     # 8. Carry out LBFGS with RE
     time_start = time.time()
@@ -156,10 +156,10 @@ def main():
         save_progress=False,
         iteration_number=NUM_ITERATIONS,
         cuda=True,
-        learning_rate=0.01,
+        learning_rate=0.1,
         record_all_nmse=True,
         optimise_algorithm="LBFGS",
-        grad_history_size=8,
+        grad_history_size=100,
         loss_function=torch.nn.KLDivLoss(reduction="sum")
     )
     time_elapsed = time.time() - time_start
@@ -176,9 +176,9 @@ def main():
     print(to_print)
 
     # 9. Compare maximum difference across slices
-    # plt.plot(range(1, NUM_ITERATIONS + 1), np.amax(nmse_lists_GS, axis=0) - np.amin(nmse_lists_GS, axis=0), label="GS")
-    # plt.plot(range(1, NUM_ITERATIONS + 1), np.amax(nmse_lists_DCGS, axis=0) - np.amin(nmse_lists_DCGS, axis=0), label="DCGS")
-    # plt.plot(range(1, NUM_ITERATIONS + 1), np.amax(nmse_lists_GD_MSE, axis=0) - np.amin(nmse_lists_GD_MSE, axis=0), label="GD_MSE")
+    plt.plot(range(1, NUM_ITERATIONS + 1), np.amax(nmse_lists_GS, axis=0) - np.amin(nmse_lists_GS, axis=0), label="GS")
+    plt.plot(range(1, NUM_ITERATIONS + 1), np.amax(nmse_lists_DCGS, axis=0) - np.amin(nmse_lists_DCGS, axis=0), label="DCGS")
+    plt.plot(range(1, NUM_ITERATIONS + 1), np.amax(nmse_lists_GD_MSE, axis=0) - np.amin(nmse_lists_GD_MSE, axis=0), label="GD_MSE")
     plt.plot(range(1, NUM_ITERATIONS + 1), np.amax(nmse_lists_LBFGS_RE, axis=0) - np.amin(nmse_lists_LBFGS_RE, axis=0), label="LBFGS_RE")
     plt.xlabel("iterarion(s)")
     plt.ylabel("Maximum difference of NMSE")
@@ -186,9 +186,9 @@ def main():
     plt.show()
 
     # 10. Compare the average among slices
-    # plt.plot(range(1, NUM_ITERATIONS + 1), np.mean(nmse_lists_GS, axis=0), label="GS")
-    # plt.plot(range(1, NUM_ITERATIONS + 1), np.mean(nmse_lists_DCGS, axis=0), label="DCGS")
-    # plt.plot(range(1, NUM_ITERATIONS + 1), np.mean(nmse_lists_GD_MSE, axis=0), label="GD_MSE")
+    plt.plot(range(1, NUM_ITERATIONS + 1), np.mean(nmse_lists_GS, axis=0), label="GS")
+    plt.plot(range(1, NUM_ITERATIONS + 1), np.mean(nmse_lists_DCGS, axis=0), label="DCGS")
+    plt.plot(range(1, NUM_ITERATIONS + 1), np.mean(nmse_lists_GD_MSE, axis=0), label="GD_MSE")
     plt.plot(range(1, NUM_ITERATIONS + 1), np.mean(nmse_lists_LBFGS_RE, axis=0), label="LBFGS_RE")
     plt.xlabel("iterarion(s)")
     plt.ylabel("Average NMSE")

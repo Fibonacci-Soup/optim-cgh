@@ -15,8 +15,8 @@ import torchvision
 import numpy as np
 import scipy
 
-DEFAULT_PITCH_SIZE = 13.62e-6  #0.00000425  # Default pitch size of the SLM
-DEFAULT_WAVELENGTH = 532e-9 #0.0000006607  # Default wavelength of the laser
+DEFAULT_PITCH_SIZE = 0.0000136  # Default pitch size of the SLM 13.62e-6 for Freeman projector
+DEFAULT_WAVELENGTH = 0.000000532  # Default wavelength of the laser 532e-9 for Freeman projector
 DEFAULT_ENERGY_CONSERVATION_SCALING = 1.0  # Default scaling factor when conserving the energy of images across different slices
 DATATYPE = torch.float32 # Switch to torch.float64 for better accuracy, but will need much more memory and computation resource
 
@@ -45,7 +45,7 @@ def load_target_images(filenames=[os.path.join('Target_images', 'A.png')], energ
     for filename in filenames:
         target_field = read_image_to_tensor(filename)
         # The following commented-out code might be useful for resizing and zero padding the target images
-        target_field = torch.nn.functional.interpolate(target_field.expand(1, -1, -1, -1), (1024, 1280))[0]
+        # target_field = torch.nn.functional.interpolate(target_field.expand(1, -1, -1, -1), (1024, 1280))[0]
         # target_field = zero_pad_to_size(target_field, target_height=1024, target_width=1024, shift_downwards=256)
         target_field_normalised = energy_conserve(target_field, energy_conserv_scaling)
         target_fields_list.append(target_field_normalised)
@@ -197,7 +197,7 @@ def save_hologram_and_its_recons(hologram, distances=[9999999], alg_name="unspec
     :param wavelength: wavelength of the light source (Default: DEFAULT_WAVELENGTH)
     :param filename_note: option to add extra note to the end of the file (Default: "")
     """
-    print("phase mean: ", hologram.angle().mean().item(), "max: ", hologram.angle().max().item(), "min: ", hologram.angle().min().item())
+    # print("phase mean: ", hologram.angle().mean().item(), "max: ", hologram.angle().max().item(), "min: ", hologram.angle().min().item())
     phase_hologram = hologram.detach().cpu().angle() % (2*math.pi) / (2*math.pi) * 255.0
     # gamma_corrected_phase_hologram = hologram_encoding_gamma_correct_linear(phase_hologram)
 
@@ -434,7 +434,7 @@ def gerchberg_saxton_single_slice(target_field, iteration_number=50, manual_seed
         phase_hologram = A.angle()
         if hologram_quantization_bit_depth:
             phase_hologram = quantize_to_bit_depth(phase_hologram, hologram_quantization_bit_depth)
-            # Compute entropy of the hologram
+            # Compute entropy of the hologram (see https://doi.org/10.1117/12.3021882)
             value, counts = np.unique(phase_hologram.cpu().numpy(), return_counts=True)
             holo_entropy_list.append(scipy.stats.entropy(counts, base=2))
         A = torch.exp(1j * phase_hologram)
