@@ -656,7 +656,7 @@ def optim_cgh_3d(target_fields, distances, sequential_slicing=False, wavelength=
                 nmse_value = (torch.nn.MSELoss(reduction="mean")(reconstruction_normalised, target_fields[index])).item() / (target_fields[index]**2).sum()
                 nmse_lists[index].append(nmse_value.data.tolist())
                 if save_progress:
-                    save_hologram_and_its_recons(hologram, distances, optimise_algorithm)
+                    save_hologram_and_its_recons(hologram, distances, optimise_algorithm, filename_note = str(i))
         time_list.append(time.time() - time_start)
         if time_limit:
             if time_list[-1] >= time_limit:
@@ -796,6 +796,10 @@ def multi_frame_cgh(target_fields, distances, wavelength=DEFAULT_WAVELENGTH, pit
         # print(i, psnr_value)
         # nmse_list.append(psnr_value)
 
+        # ssim_value = pytorch_msssim.ssim(reconstructions, target_fields).item()
+        # print(ssim_value)
+        # nmse_list.append(ssim_value)
+
         # Record the time stamp at each iteration for timing analysis
         time_list.append(time.time() - time_start)
         if time_limit:
@@ -854,21 +858,30 @@ def tipo(target_fields, distances, wavelength=DEFAULT_WAVELENGTH, pitch_size=DEF
     for i in range(iteration_number):
         optimiser.zero_grad()
         target_complex_field = target_fields * torch.exp(1j * phase)
+        if not os.path.isdir(os.path.join('Output', 'TIPO')):
+            os.makedirs(os.path.join('Output', 'TIPO'))
+
+        save_image(os.path.join('Output', 'TIPO', 'TIPO_target_phase{}_d{}'.format(i, distance)), phase.detach().cpu())
 
         holograms = fresnel_backward_propergation(target_complex_field, distance=distances[0], pitch_size=pitch_size, wavelength=wavelength)
         phase_holograms = holograms.angle()
         save_image(os.path.join('Output', 'TIPO', 'TIPO_holo{}_d{}'.format(i, distance)), phase_holograms[0].detach().cpu())
-        reconstructions = energy_conserve(fresnel_propergation(torch.exp(1j * phase_holograms), distance=distances[0], pitch_size=pitch_size, wavelength=wavelength).abs())
+        # reconstructions = energy_conserve(fresnel_propergation(torch.exp(1j * phase_holograms), distance=distances[0], pitch_size=pitch_size, wavelength=wavelength).abs())
+        reconstructions = fresnel_propergation(torch.exp(1j * phase_holograms), distance=distances[0], pitch_size=pitch_size, wavelength=wavelength)
+        save_image(os.path.join('Output', 'TIPO', 'TIPO_recon_phase{}_d{}'.format(i, distance)), reconstructions[0].angle().detach().cpu())
+        reconstructions = energy_conserve(reconstructions.abs())
+
         if not os.path.isdir(os.path.join('Output', 'TIPO')):
             os.makedirs(os.path.join('Output', 'TIPO'))
         save_image(os.path.join('Output', 'TIPO', 'TIPO_recon{}_d{}'.format(i, distance)), reconstructions[0].detach().cpu())
         loss = loss_function(torch.flatten(reconstructions / target_fields.max()).expand(1, -1),
                              torch.flatten(target_fields / target_fields.max()).expand(1, -1))#loss_function(hologram.abs(), torch.ones(size=hologram.size()).to(device)*hologram.abs().mean())
 
-        print(loss.item())
-
         loss.backward(retain_graph=True)
 
+
+        nmse_value = (torch.nn.MSELoss(reduction="mean")(reconstructions, target_fields)).item() / (target_fields**2).sum().data.item()
+        nmse_lists[0].append(nmse_value)
         time_list.append(time.time() - time_start)
         if time_limit:
             if time_list[-1] >= time_limit:
