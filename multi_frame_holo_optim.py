@@ -62,7 +62,7 @@ def main():
 
     # 6. Plot the numerical results
     plt.plot(range(1, NUM_ITERATIONS + 1), nmse_list_LBFGS_RE, '-', label="Number_of_frames: {}".format(NUM_FRAMES))
-    plt.xlabel("iterarions")
+    plt.xlabel("iteration number")
     plt.ylabel("NMSE")
     plt.legend()
     plt.show()
