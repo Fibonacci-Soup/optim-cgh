@@ -24,11 +24,9 @@ def main():
     NUM_ITERATIONS = 100
     PLOT_EACH_SLICE = True
 
-    # 1. Load target images from files (please use PNG format with zero compression, even although PNG compression is lossless)
-    # images = [os.path.join('Target_images', x) for x in ['A.png', 'B.png', 'C.png', 'D.png']]
-    # images = [os.path.join('Target_images', x) for x in ['512_A.png', '512_B.png', '512_C.png', '512_D.png']]
-    # images = [os.path.join('Target_images', 'mandrill_smaller.png')]
-    images = [os.path.join('Target_images', 'mandrill.png')]
+    # 1. Load target images from files (please use PNG format with zero compression, although PNG compression is lossless)
+    images = [os.path.join('Target_images', 'mandrill_smaller.png')]
+    # images = [os.path.join('Target_images', 'mandrill.png')]
     # images = [os.path.join('Target_images', 'holography_ambigram_smaller.png')]
     target_fields = cgh_toolbox.load_target_images(images, energy_conserv_scaling=ENERGY_CONSERVATION_SCALING)
 

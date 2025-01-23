@@ -19,7 +19,7 @@ def main():
     NUM_FRAMES = 24
     ENERGY_CONSERVATION_SCALING = 1.0  # Scaling factor when conserving the energy of images across different slices
 
-    # 1. Load target images from files (please use PNG format with zero compression, even though PNG compression is lossless)
+    # 1. Load target images from files (please use PNG format with zero compression, although PNG compression is lossless)
     # images = [os.path.join('Target_images', x) for x in ['A.png', 'B.png', 'C.png', 'D.png']]
     # images = [os.path.join('Target_images', x) for x in ['512_A.png', '512_B.png', '512_C.png', '512_D.png']]
     # images = [os.path.join('Target_images', x) for x in ['IMG_5798.JPG', 'IMG_5799.JPG', 'IMG_5800.JPG']]
