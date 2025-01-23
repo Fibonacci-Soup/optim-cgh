@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 """
-Copyright(c) 2022 Jinze Sha (js2294@cam.ac.uk)
+Copyright(c) 2022 Jinze Sha (jinze.sha@cantab.net)
 Centre for Molecular Materials, Photonics and Electronics, University of Cambridge
 All Rights Reserved.
 
-This is the python script for Limited-memory Broyden-Fletcher-Goldfarb-Shanno (L-BFGS)
-optimisation of Computer-Generated Hologram (CGH) whose reconstruction is a 3D target
-consisted of multiple slices of 2D images at different distances.
+This is the python script for Limited-memory Broyden-Fletcher-Goldfarb-Shanno (L-BFGS) optimisation of Computer-Generated Hologram (CGH) whose reconstruction is a 3D target consisted of multiple slices of 2D images at different distances.
+If using L-BFGS with Sequential Slicing, please make reference to: https://doi.org/10.1364/JOSAA.478430
 """
 
 import os
@@ -24,7 +23,7 @@ ENERGY_CONSERVATION_SCALING = 1.0  # Scaling factor when conserving the energy o
 
 def main():
     NUM_ITERATIONS = 100
-    SEQUENTIAL_SLICING = True
+    SEQUENTIAL_SLICING = False
     PLOT_EACH_SLICE = True
 
     # 1.A Option1: Load target images from files (please use PNG format with zero compression, even although PNG compression is lossless)
@@ -69,9 +68,8 @@ def main():
 
 
 
-
     # 2. Set distances according to each slice of the target (in meters)
-    distances = [0.1 + i*0.1 for i in range(len(target_fields))]
+    distances = [0.01 + i*0.01 for i in range(len(target_fields))]
 
     # 3. Check for mismatch between numbers of distances and images given
     if len(distances) != len(target_fields):
@@ -84,17 +82,16 @@ def main():
     for i, target_field in enumerate(target_fields):
         cgh_toolbox.save_image(os.path.join('Output', 'Target_field_{}'.format(i)), target_field)
 
-
     # 5. Carry out GS with SS
     time_start = time.time()
     hologram, nmse_lists_GS, time_list_GS = cgh_toolbox.gerchberg_saxton_3d_sequential_slicing(
         target_fields, distances, iteration_number=NUM_ITERATIONS, weighting=0, pitch_size=PITCH_SIZE, wavelength=WAVELENGTH)
     time_elapsed = time.time() - time_start
-    to_print = "GS reference:\t time elapsed = {:.3f}s".format(time_elapsed)
-    cgh_toolbox.save_hologram_and_its_recons(hologram, distances, "GS")
+    to_print = "GS SS reference:\t time elapsed = {:.3f}s".format(time_elapsed)
+    cgh_toolbox.save_hologram_and_its_recons(hologram, distances, "GS", recon_dynamic_range=target_fields[0].max())
     if PLOT_EACH_SLICE:
         for index, nmse_list in enumerate(nmse_lists_GS):
-            plt.plot(range(1, NUM_ITERATIONS + 1), nmse_list, '--', label="GS with SS (Slice {})".format(index + 1))
+            plt.plot(range(1, NUM_ITERATIONS + 1), nmse_list, '-', label="GS with SS (Slice {})".format(index + 1))
             to_print += "\tNMSE_{} = {:.15e}".format(index + 1, nmse_list[-1])
         plt.xlabel("iteration number")
         plt.ylabel("NMSE")
@@ -105,13 +102,13 @@ def main():
     # 6. Carry out DCGS
     time_start = time.time()
     hologram, nmse_lists_DCGS, time_list_DCGS = cgh_toolbox.gerchberg_saxton_3d_sequential_slicing(
-        target_fields, distances, iteration_number=NUM_ITERATIONS, weighting=0.001, pitch_size=PITCH_SIZE, wavelength=WAVELENGTH)
+        target_fields, distances, iteration_number=NUM_ITERATIONS, weighting=0.01, pitch_size=PITCH_SIZE, wavelength=WAVELENGTH)
     time_elapsed = time.time() - time_start
     to_print = "DCGS reference:\t time elapsed = {:.3f}s".format(time_elapsed)
-    cgh_toolbox.save_hologram_and_its_recons(hologram, distances, "DCGS")
+    cgh_toolbox.save_hologram_and_its_recons(hologram, distances, "DCGS", recon_dynamic_range=target_fields[0].max())
     if PLOT_EACH_SLICE:
         for index, nmse_list in enumerate(nmse_lists_DCGS):
-            plt.plot(range(1, NUM_ITERATIONS + 1), nmse_list, '--', label="DCGS (Slice {})".format(index + 1))
+            plt.plot(range(1, NUM_ITERATIONS + 1), nmse_list, '-', label="DCGS (Slice {})".format(index + 1))
             to_print += "\tNMSE_{} = {:.15e}".format(index + 1, nmse_list[-1])
         plt.xlabel("iteration number")
         plt.ylabel("NMSE")
@@ -135,10 +132,10 @@ def main():
     )
     time_elapsed = time.time() - time_start
     to_print = "GD with MSE:\t time elapsed = {:.3f}s".format(time_elapsed)
-    cgh_toolbox.save_hologram_and_its_recons(hologram, distances, "GD_MSE")
+    cgh_toolbox.save_hologram_and_its_recons(hologram, distances, "GD_MSE", recon_dynamic_range=target_fields[0].max())
     if PLOT_EACH_SLICE:
         for index, nmse_list in enumerate(nmse_lists_GD_MSE):
-            plt.plot(range(1, NUM_ITERATIONS + 1), nmse_list, '.--', label="GD with MSE (Slice {})".format(index + 1))
+            plt.plot(range(1, NUM_ITERATIONS + 1), nmse_list, '-', label="GD with MSE (Slice {})".format(index + 1))
             to_print += "\tNMSE_{} = {:.15e}".format(index + 1, nmse_list[-1])
         plt.xlabel("iteration number")
         plt.ylabel("NMSE")
@@ -159,12 +156,12 @@ def main():
         learning_rate=0.1,
         record_all_nmse=True,
         optimise_algorithm="LBFGS",
-        grad_history_size=8,
+        grad_history_size=10,
         loss_function=torch.nn.KLDivLoss(reduction="sum")
     )
     time_elapsed = time.time() - time_start
     to_print = "L-BFGS with RE:\t time elapsed = {:.3f}s".format(time_elapsed)
-    cgh_toolbox.save_hologram_and_its_recons(hologram, distances, "LBFGS_RE")
+    cgh_toolbox.save_hologram_and_its_recons(hologram, distances, "LBFGS_RE", recon_dynamic_range=target_fields[0].max())
     if PLOT_EACH_SLICE:
         for index, nmse_list in enumerate(nmse_lists_LBFGS_RE):
             plt.plot(range(1, NUM_ITERATIONS + 1), nmse_list, '-', label="L-BFGS with RE (Slice {})".format(index + 1))

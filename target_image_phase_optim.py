@@ -1,23 +1,17 @@
-
-
-
-
 #!/usr/bin/env python3
 """
-Copyright(c) 2022 Jinze Sha (js2294@cam.ac.uk)
+Copyright(c) 2024 Jinze Sha (jinze.sha@cantab.net)
 Centre for Molecular Materials, Photonics and Electronics, University of Cambridge
 All Rights Reserved.
 
-This is the python script for Limited-memory Broyden-Fletcher-Goldfarb-Shanno (L-BFGS)
-optimisation of Computer-Generated Hologram (CGH) whose reconstruction is a 3D target
-consisted of multiple slices of 2D images at different distances.
+This is the python script for Target Image Phase Optimisation Hologram Generation Method for Phase-Only Spatial Light Modulators
+Please make reference of this code to: <@TODO>
 """
 
 import os
 import time
 import torch
 import matplotlib.pyplot as plt
-import numpy as np
 import cgh_toolbox
 
 # Experimental setup - device properties
@@ -37,12 +31,6 @@ def main():
     images = [os.path.join('Target_images', 'mandrill.png')]
     # images = [os.path.join('Target_images', 'holography_ambigram_smaller.png')]
     target_fields = cgh_toolbox.load_target_images(images, energy_conserv_scaling=ENERGY_CONSERVATION_SCALING)
-
-    # target_fields_list = []
-    # donut_pattern = cgh_toolbox.energy_conserve(cgh_toolbox.generate_donut_pattern(radius=128, line_thickness=128))
-    # donut_pattern = cgh_toolbox.zero_pad_to_size(donut_pattern, target_height=512, target_width=512)
-    # target_fields_list.append(donut_pattern)
-    # target_fields = torch.stack(target_fields_list)
 
     # 2. Set distances according to each slice of the target (in meters)
     # distances = [0.01 + i*0.01 for i in range(len(target_fields))]
@@ -149,7 +137,7 @@ def main():
             to_print += "\tNMSE_{} = {:.15e}".format(index + 1, nmse_list[-1])
     print(to_print)
 
-    plt.xlabel("iterarion(s)")
+    plt.xlabel("iteration number")
     plt.ylabel("NMSE")
     plt.legend()
     plt.show()
