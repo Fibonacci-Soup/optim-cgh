@@ -5,7 +5,7 @@ Centre for Molecular Materials, Photonics and Electronics, University of Cambrid
 All Rights Reserved.
 
 This is the python script for Target Image Phase Optimisation Hologram Generation Method for Phase-Only Spatial Light Modulators
-Please make reference of this code to: <@TODO>
+Please make reference of this code to: https://doi.org/10.1117/12.3039305
 """
 
 import os

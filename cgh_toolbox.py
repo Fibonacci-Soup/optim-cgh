@@ -853,7 +853,7 @@ def tipo(target_fields, distances, wavelength=DEFAULT_WAVELENGTH, pitch_size=DEF
                  initial_phase='random'):
     """
     Target Image Phase Optimization (TIPO)
-    Please make reference of this function to: <@TODO>
+    Please make reference of this function to: https://doi.org/10.1117/12.3039305
 
     :param target_fields: tensor for target images
     :param distances: a list of image distances (e.g. [1.1 2.3 3.1 4.3]), whose length matches the number of target images
